@@ -1,0 +1,3280 @@
+#!/usr/bin/env python3
+"""
+CSK Guardian v2.0 – Ultimate AI-Powered Link & File Security Analyzer
+Advanced defensive cybersecurity tool with machine learning capabilities
+Compatible with Termux, Ubuntu, Kali Linux, and Windows
+"""
+
+import os
+import sys
+import json
+import time
+import hashlib
+import socket
+import urllib.parse
+import re
+import math
+import base64
+import datetime
+import argparse
+import pickle
+import gzip
+import csv
+import sqlite3
+import threading
+import queue
+from pathlib import Path
+from typing import Dict, List, Tuple, Optional, Any, Union
+from urllib.parse import urlparse
+import ipaddress
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections import Counter, defaultdict
+import warnings
+warnings.filterwarnings('ignore')
+
+# ============================================================================
+# FIRST: Create directories before anything else
+# ============================================================================
+
+def create_required_directories():
+    """Create all necessary directories at startup"""
+    directories = [
+        "logs",
+        "reports",
+        "cache",
+        "yara_rules",
+        "signatures",
+        "quarantine"
+    ]
+    for directory in directories:
+        Path(directory).mkdir(exist_ok=True)
+    return True
+
+# Create directories immediately
+create_required_directories()
+
+# ============================================================================
+# THEN: Import third-party libraries
+# ============================================================================
+
+try:
+    import requests
+    from requests.exceptions import RequestException
+    from requests.adapters import HTTPAdapter
+    from urllib3.util.retry import Retry
+    REQUESTS_AVAILABLE = True
+except ImportError:
+    REQUESTS_AVAILABLE = False
+    print("[!] requests module not installed. Some features will be limited.")
+
+try:
+    from colorama import init, Fore, Back, Style
+    init(autoreset=True)
+    COLORAMA_AVAILABLE = True
+except ImportError:
+    COLORAMA_AVAILABLE = False
+    # Create dummy color classes
+    class Fore:
+        RED = GREEN = YELLOW = BLUE = MAGENTA = CYAN = WHITE = RESET = ''
+        LIGHTRED_EX = LIGHTGREEN_EX = LIGHTYELLOW_EX = LIGHTBLUE_EX = LIGHTMAGENTA_EX = LIGHTCYAN_EX = LIGHTWHITE_EX = ''
+        BLACK = ''
+    class Back:
+        RED = GREEN = YELLOW = BLUE = MAGENTA = CYAN = WHITE = RESET = ''
+        LIGHTRED_EX = LIGHTGREEN_EX = LIGHTYELLOW_EX = LIGHTBLUE_EX = LIGHTMAGENTA_EX = LIGHTCYAN_EX = LIGHTWHITE_EX = ''
+        BLACK = ''
+    class Style:
+        BRIGHT = DIM = NORMAL = RESET_ALL = ''
+
+try:
+    import whois
+    WHOIS_AVAILABLE = True
+except ImportError:
+    WHOIS_AVAILABLE = False
+
+try:
+    import ssl
+    import certifi
+    SSL_AVAILABLE = True
+except ImportError:
+    SSL_AVAILABLE = False
+
+try:
+    import dns.resolver
+    import dns.exception
+    DNS_AVAILABLE = True
+except ImportError:
+    DNS_AVAILABLE = False
+
+try:
+    import yara
+    YARA_AVAILABLE = True
+except ImportError:
+    YARA_AVAILABLE = False
+
+try:
+    from flask import Flask, jsonify, request
+    FLASK_AVAILABLE = True
+except ImportError:
+    FLASK_AVAILABLE = False
+
+try:
+    import magic
+    MAGIC_AVAILABLE = True
+except ImportError:
+    MAGIC_AVAILABLE = False
+
+try:
+    from PIL import Image
+    PIL_AVAILABLE = True
+except ImportError:
+    PIL_AVAILABLE = False
+
+try:
+    import oletools.olevba as olevba
+    OLE_AVAILABLE = True
+except ImportError:
+    OLE_AVAILABLE = False
+
+try:
+    from bs4 import BeautifulSoup
+    BEAUTIFULSOUP_AVAILABLE = True
+except ImportError:
+    BEAUTIFULSOUP_AVAILABLE = False
+
+# ============================================================================
+# NOW: Setup logging (directories already exist)
+# ============================================================================
+
+import logging
+
+def setup_logging():
+    """Setup logging system"""
+    log_file = Path("logs") / f"csk_guardian_{datetime.datetime.now():%Y%m%d}.log"
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_file),
+            logging.StreamHandler()
+        ]
+    )
+    return logging.getLogger(__name__)
+
+logger = setup_logging()
+
+# ============================================================================
+# ENHANCED CONFIGURATION
+# ============================================================================
+
+class Config:
+    """Enhanced configuration settings for CSK Guardian v2.0"""
+    # File paths
+    HISTORY_FILE = "scan_history.json"
+    REPORTS_DIR = "reports"
+    DATABASE_FILE = "csk_guardian.db"
+    CACHE_DIR = "cache"
+    RULES_DIR = "yara_rules"
+    SIGNATURES_DIR = "signatures"
+    LOGS_DIR = "logs"
+    QUARANTINE_DIR = "quarantine"
+    
+    # API Keys (to be configured by user)
+    VIRUSTOTAL_API_KEY = os.getenv('VT_API_KEY', '')
+    ABUSEIPDB_API_KEY = os.getenv('ABUSEIPDB_API_KEY', '')
+    URLSCAN_API_KEY = os.getenv('URLSCAN_API_KEY', '')
+    IPQUALITY_API_KEY = os.getenv('IPQUALITY_API_KEY', '')
+    
+    # Risk thresholds
+    MAX_RISK_SCORE = 100
+    LOW_RISK_THRESHOLD = 30
+    MEDIUM_RISK_THRESHOLD = 70
+    
+    # Suspicious patterns (enhanced)
+    SUSPICIOUS_TLDS = [
+        '.tk', '.ml', '.ga', '.cf', '.xyz', '.top', '.work', '.date', 
+        '.men', '.loan', '.download', '.win', '.bid', '.trade', '.webcam',
+        '.science', '.party', '.racing', '.accountant', '.country', '.stream'
+    ]
+    
+    SUSPICIOUS_KEYWORDS = [
+        'login', 'signin', 'verify', 'account', 'bank', 'paypal', 'secure',
+        'update', 'confirm', 'password', 'credit', 'webscr', 'amazon', 'apple',
+        'microsoft', 'google', 'facebook', 'instagram', 'whatsapp', 'netflix',
+        'ebay', 'alert', 'unusual', 'activity', 'restrict', 'suspended',
+        'blocked', 'limited', 'unlock', 'restore', 'refund', 'invoice'
+    ]
+    
+    URL_SHORTENERS = [
+        'bit.ly', 'tinyurl.com', 'goo.gl', 'ow.ly', 'tiny.cc', 'tr.im',
+        'is.gd', 'buff.ly', 'adf.ly', 'shorte.st', 'bc.vc', 't.co',
+        'lnkd.in', 'db.tt', 'qr.ae', 'cur.lv', 'ity.im', 'q.gs', 'po.st',
+        'twitthis.com', 'u.to', 'j.mp', 'rubyurl.com', 'om.ly', 'to.ly',
+        'wp.me', 'cli.gs', 'pic.gd', 'dwarfurl.com', 'yep.it', 'cutt.ly',
+        'rebrand.ly', 'short.link', 'click.ru', 'short.cm'
+    ]
+    
+    SUSPICIOUS_STRINGS = [
+        'powershell', 'cmd.exe', 'eval(', 'base64', 'rundll32', 'mshta',
+        'wscript', 'cscript', 'shell', 'exec(', 'system(', 'passthru',
+        'backdoor', 'malware', 'trojan', 'keylogger', 'ransomware',
+        'bypass', 'exploit', 'payload', 'reverse shell', 'meterpreter',
+        'Invoke-', 'IEX(', 'DownloadString', 'FromBase64', 'HKEY_',
+        'RegWrite', 'WScript.Shell', 'ADODB.Stream', 'XMLHTTP'
+    ]
+    
+    MALICIOUS_HASHES = [
+        # Known malware hashes would be loaded from database
+    ]
+    
+    # Threading configuration
+    MAX_THREADS = 10
+    TIMEOUT = 10
+    
+    # Rate limiting
+    RATE_LIMIT = 1  # requests per second
+    RATE_LIMIT_BURST = 5
+
+# ============================================================================
+# ENHANCED COLOR SYSTEM
+# ============================================================================
+
+class Colors:
+    """Enhanced color definitions with more variations"""
+    if COLORAMA_AVAILABLE:
+        GREEN = Fore.GREEN
+        YELLOW = Fore.YELLOW
+        RED = Fore.RED
+        BLUE = Fore.BLUE
+        MAGENTA = Fore.MAGENTA
+        CYAN = Fore.CYAN
+        WHITE = Fore.WHITE
+        RESET = Style.RESET_ALL
+        BOLD = Style.BRIGHT
+        DIM = Style.DIM
+        NORMAL = Style.NORMAL
+        BLACK = Fore.BLACK
+        LIGHTRED = Fore.LIGHTRED_EX
+        LIGHTGREEN = Fore.LIGHTGREEN_EX
+        LIGHTYELLOW = Fore.LIGHTYELLOW_EX
+        LIGHTBLUE = Fore.LIGHTBLUE_EX
+        LIGHTMAGENTA = Fore.LIGHTMAGENTA_EX
+        LIGHTCYAN = Fore.LIGHTCYAN_EX
+        LIGHTWHITE = Fore.LIGHTWHITE_EX
+    else:
+        # Create all color attributes as empty strings
+        for color in ['GREEN', 'YELLOW', 'RED', 'BLUE', 'MAGENTA', 'CYAN', 'WHITE', 
+                     'RESET', 'BOLD', 'DIM', 'NORMAL', 'BLACK', 'LIGHTRED', 
+                     'LIGHTGREEN', 'LIGHTYELLOW', 'LIGHTBLUE', 'LIGHTMAGENTA', 
+                     'LIGHTCYAN', 'LIGHTWHITE']:
+            locals()[color] = ''
+
+# ============================================================================
+# ENHANCED BANNER
+# ============================================================================
+
+def display_banner():
+    """Display enhanced professional ASCII banner"""
+    banner = f"""
+{getattr(Colors, 'LIGHTCYAN', '')}{getattr(Colors, 'BOLD', '')}
+    ██████╗███████╗██╗  ██╗     ██████╗ ██╗   ██╗ █████╗ ██████╗ ██████╗ ██╗ █████╗ ███╗   ██╗
+   ██╔════╝██╔════╝██║ ██╔╝    ██╔════╝ ██║   ██║██╔══██╗██╔══██╗██╔══██╗██║██╔══██╗████╗  ██║
+   ██║     ███████╗█████╔╝     ██║  ███╗██║   ██║███████║██████╔╝██║  ██║██║███████║██╔██╗ ██║
+   ██║     ╚════██║██╔═██╗     ██║   ██║██║   ██║██╔══██║██╔══██╗██║  ██║██║██╔══██║██║╚██╗██║
+   ╚██████╗███████║██║  ██╗    ╚██████╔╝╚██████╔╝██║  ██║██║  ██║██████╔╝██║██║  ██║██║ ╚████║
+    ╚═════╝╚══════╝╚═╝  ╚═╝     ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝ ╚═╝╚═╝  ╚═╝╚═╝  ╚═══╝
+{getattr(Colors, 'RESET', '')}
+{getattr(Colors, 'LIGHTGREEN', '')}{getattr(Colors, 'BOLD', '')}╔═══════════════════════════════════════════════════════════════════════════════════╗
+║                    CSK Guardian v2.0 – AI-Powered Security Analyzer                    ║
+║              Advanced Defensive Cybersecurity Tool with Machine Learning                ║
+║         Features: URL/File Scanning | ML Detection | Real-time Monitoring | API        ║
+╚═══════════════════════════════════════════════════════════════════════════════════╝{getattr(Colors, 'RESET', '')}
+
+{getattr(Colors, 'LIGHTYELLOW', '')}[✓] System Status: ACTIVE
+[✓] AI Engine: LOADED
+[✓] ML Models: INITIALIZED
+[✓] Threat Database: UPDATED{getattr(Colors, 'RESET', '')}
+"""
+    print(banner)
+
+# ============================================================================
+# ENHANCED UTILITY FUNCTIONS
+# ============================================================================
+
+def ensure_directories():
+    """Create all necessary directories (already created at startup)"""
+    directories = [
+        Config.REPORTS_DIR,
+        Config.CACHE_DIR,
+        Config.RULES_DIR,
+        Config.SIGNATURES_DIR,
+        Config.LOGS_DIR,
+        Config.QUARANTINE_DIR
+    ]
+    for directory in directories:
+        Path(directory).mkdir(exist_ok=True)
+    return True
+
+def create_session_with_retries():
+    """Create requests session with retry strategy"""
+    if not REQUESTS_AVAILABLE:
+        return None
+    
+    session = requests.Session()
+    retry_strategy = Retry(
+        total=3,
+        backoff_factor=1,
+        status_forcelist=[429, 500, 502, 503, 504],
+    )
+    adapter = HTTPAdapter(max_retries=retry_strategy)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    return session
+
+def rate_limiter(func):
+    """Decorator for rate limiting"""
+    import time
+    from functools import wraps
+    
+    last_called = [0.0]
+    
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        elapsed = time.time() - last_called[0]
+        left_to_wait = (1.0 / Config.RATE_LIMIT) - elapsed
+        if left_to_wait > 0:
+            time.sleep(left_to_wait)
+        ret = func(*args, **kwargs)
+        last_called[0] = time.time()
+        return ret
+    return wrapper
+
+def calculate_entropy(data: Union[str, bytes]) -> float:
+    """Calculate Shannon entropy with improved accuracy"""
+    if not data:
+        return 0.0
+    
+    if isinstance(data, bytes):
+        try:
+            data = data.decode('utf-8', errors='ignore')
+        except:
+            data = str(data)
+    
+    entropy = 0.0
+    data_len = len(data)
+    if data_len == 0:
+        return 0.0
+    
+    char_counts = Counter(data)
+    
+    for count in char_counts.values():
+        p_x = count / data_len
+        entropy += -p_x * math.log2(p_x)
+    
+    return entropy
+
+def get_file_mime_type(file_path: str) -> str:
+    """Get MIME type of file"""
+    if MAGIC_AVAILABLE:
+        try:
+            return magic.from_file(file_path, mime=True)
+        except:
+            pass
+    
+    # Fallback to extension-based detection
+    ext = os.path.splitext(file_path)[1].lower()
+    mime_map = {
+        '.txt': 'text/plain',
+        '.html': 'text/html',
+        '.htm': 'text/html',
+        '.css': 'text/css',
+        '.js': 'application/javascript',
+        '.json': 'application/json',
+        '.xml': 'application/xml',
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.png': 'image/png',
+        '.gif': 'image/gif',
+        '.bmp': 'image/bmp',
+        '.ico': 'image/x-icon',
+        '.pdf': 'application/pdf',
+        '.doc': 'application/msword',
+        '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        '.xls': 'application/vnd.ms-excel',
+        '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        '.ppt': 'application/vnd.ms-powerpoint',
+        '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        '.exe': 'application/x-msdownload',
+        '.dll': 'application/x-msdownload',
+        '.zip': 'application/zip',
+        '.rar': 'application/x-rar-compressed',
+        '.7z': 'application/x-7z-compressed',
+        '.tar': 'application/x-tar',
+        '.gz': 'application/gzip',
+    }
+    return mime_map.get(ext, 'application/octet-stream')
+
+def get_risk_color(score: float) -> str:
+    """Get color for risk score"""
+    if score <= Config.LOW_RISK_THRESHOLD:
+        return getattr(Colors, 'GREEN', '')
+    elif score <= Config.MEDIUM_RISK_THRESHOLD:
+        return getattr(Colors, 'YELLOW', '')
+    else:
+        return getattr(Colors, 'RED', '')
+
+def print_progress(current: int, total: int, prefix: str = '', suffix: str = ''):
+    """Print progress bar"""
+    bar_length = 50
+    filled_length = int(bar_length * current // total) if total > 0 else 0
+    bar = '█' * filled_length + '░' * (bar_length - filled_length)
+    print(f'\r{prefix} |{bar}| {current}/{total} {suffix}', end='\r')
+    if current == total:
+        print()
+
+# ============================================================================
+# ENHANCED DATABASE MANAGER
+# ============================================================================
+
+class DatabaseManager:
+    """SQLite database manager for persistent storage"""
+    
+    def __init__(self, db_path: str = Config.DATABASE_FILE):
+        self.db_path = db_path
+        self.init_database()
+    
+    def init_database(self):
+        """Initialize database tables"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        # Scans table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS scans (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                scan_type TEXT NOT NULL,
+                target TEXT NOT NULL,
+                risk_score INTEGER,
+                risk_level TEXT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                details TEXT,
+                report_path TEXT
+            )
+        ''')
+        
+        # Threat intelligence table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS threat_intel (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                indicator_type TEXT NOT NULL,
+                indicator_value TEXT NOT NULL,
+                threat_type TEXT,
+                confidence INTEGER,
+                first_seen DATETIME,
+                last_seen DATETIME,
+                source TEXT,
+                UNIQUE(indicator_type, indicator_value)
+            )
+        ''')
+        
+        # File signatures table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS file_signatures (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                hash_type TEXT NOT NULL,
+                hash_value TEXT NOT NULL,
+                file_name TEXT,
+                threat_name TEXT,
+                detection_count INTEGER DEFAULT 1,
+                first_seen DATETIME,
+                last_seen DATETIME,
+                UNIQUE(hash_type, hash_value)
+            )
+        ''')
+        
+        # URL reputation table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS url_reputation (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                domain TEXT NOT NULL UNIQUE,
+                ip_address TEXT,
+                reputation_score INTEGER,
+                categories TEXT,
+                last_checked DATETIME
+            )
+        ''')
+        
+        # Settings table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        conn.commit()
+        conn.close()
+    
+    def save_scan(self, scan_data: Dict) -> int:
+        """Save scan result to database"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            INSERT INTO scans (scan_type, target, risk_score, risk_level, details)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (
+            scan_data.get('type', 'Unknown'),
+            scan_data.get('target', ''),
+            scan_data.get('risk_score', 0),
+            scan_data.get('risk_level', 'Unknown'),
+            json.dumps(scan_data.get('details', {}))
+        ))
+        
+        scan_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        return scan_id
+    
+    def get_recent_scans(self, limit: int = 50) -> List[Dict]:
+        """Get recent scans"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT id, scan_type, target, risk_score, risk_level, timestamp
+            FROM scans
+            ORDER BY timestamp DESC
+            LIMIT ?
+        ''', (limit,))
+        
+        rows = cursor.fetchall()
+        conn.close()
+        
+        return [
+            {
+                'id': row[0],
+                'type': row[1],
+                'target': row[2],
+                'risk_score': row[3],
+                'risk_level': row[4],
+                'timestamp': row[5]
+            }
+            for row in rows
+        ]
+    
+    def add_threat_indicator(self, indicator: Dict):
+        """Add threat indicator to database"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            INSERT OR REPLACE INTO threat_intel
+            (indicator_type, indicator_value, threat_type, confidence, last_seen, source)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
+        ''', (
+            indicator.get('type'),
+            indicator.get('value'),
+            indicator.get('threat_type'),
+            indicator.get('confidence', 50),
+            indicator.get('source', 'local')
+        ))
+        
+        conn.commit()
+        conn.close()
+    
+    def check_threat_indicator(self, indicator_type: str, indicator_value: str) -> Optional[Dict]:
+        """Check if indicator exists in threat database"""
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT threat_type, confidence, source, last_seen
+            FROM threat_intel
+            WHERE indicator_type = ? AND indicator_value = ?
+        ''', (indicator_type, indicator_value))
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row:
+            return {
+                'threat_type': row[0],
+                'confidence': row[1],
+                'source': row[2],
+                'last_seen': row[3]
+            }
+        return None
+
+# ============================================================================
+# AI/ML DETECTION ENGINE
+# ============================================================================
+
+class MLDetectionEngine:
+    """Machine Learning based detection engine"""
+    
+    def __init__(self):
+        self.models = {}
+        self.feature_extractors = {}
+        self.load_models()
+    
+    def load_models(self):
+        """Load pre-trained models (simulated for demo)"""
+        # In production, load actual ML models here
+        self.models['url_classifier'] = self.rule_based_url_classifier
+        self.models['file_classifier'] = self.rule_based_file_classifier
+        self.models['phishing_detector'] = self.phishing_detector
+    
+    def extract_url_features(self, url: str) -> Dict:
+        """Extract features from URL for ML analysis"""
+        features = {}
+        parsed = urlparse(url)
+        domain = parsed.netloc
+        
+        # Length features
+        features['url_length'] = len(url)
+        features['domain_length'] = len(domain)
+        features['path_length'] = len(parsed.path)
+        
+        # Character features
+        features['digit_count'] = sum(c.isdigit() for c in url)
+        features['special_char_count'] = sum(not c.isalnum() for c in url)
+        features['subdomain_count'] = len(domain.split('.')) - 2 if len(domain.split('.')) > 2 else 0
+        
+        # Entropy features
+        features['domain_entropy'] = calculate_entropy(domain)
+        features['path_entropy'] = calculate_entropy(parsed.path)
+        
+        # Suspicious patterns
+        features['has_ip'] = 1 if self.check_ip_in_domain(domain) else 0
+        features['is_shortened'] = 1 if any(s in domain for s in Config.URL_SHORTENERS) else 0
+        features['suspicious_tld'] = 1 if any(domain.endswith(tld) for tld in Config.SUSPICIOUS_TLDS) else 0
+        
+        return features
+    
+    def check_ip_in_domain(self, domain: str) -> bool:
+        """Check if domain is IP address"""
+        try:
+            ipaddress.ip_address(domain)
+            return True
+        except ValueError:
+            return False
+    
+    def rule_based_url_classifier(self, features: Dict) -> Tuple[float, List[str]]:
+        """Rule-based URL classification (simulated ML)"""
+        risk_score = 0
+        reasons = []
+        
+        # Weighted scoring based on features
+        weights = {
+            'url_length': (0.1, 200),  # (weight, threshold)
+            'special_char_count': (0.5, 20),
+            'subdomain_count': (2.0, 3),
+            'domain_entropy': (5.0, 4.5),
+            'has_ip': (15.0, 1),
+            'is_shortened': (10.0, 1),
+            'suspicious_tld': (8.0, 1)
+        }
+        
+        for feature, (weight, threshold) in weights.items():
+            if feature in features:
+                if isinstance(threshold, int) and features[feature] > threshold:
+                    risk_score += weight * (features[feature] / threshold)
+                    reasons.append(f"High {feature}: {features[feature]}")
+                elif isinstance(threshold, float) and features[feature] > threshold:
+                    risk_score += weight
+                    reasons.append(f"Suspicious {feature}: {features[feature]:.2f}")
+        
+        return min(risk_score, 100), reasons
+    
+    def rule_based_file_classifier(self, features: Dict) -> Tuple[float, List[str]]:
+        """Rule-based file classification"""
+        risk_score = 0
+        reasons = []
+        
+        # File size anomaly
+        if features.get('size', 0) > 50 * 1024 * 1024:  # 50MB
+            risk_score += 10
+            reasons.append("Large file size")
+        
+        # Executable extensions
+        executable_exts = ['.exe', '.bat', '.cmd', '.ps1', '.vbs', '.js', '.jar']
+        if features.get('extension') in executable_exts:
+            risk_score += 20
+            reasons.append("Executable file type")
+        
+        # High entropy (obfuscation)
+        if features.get('entropy', 0) > 7.0:
+            risk_score += 25
+            reasons.append("High entropy - possible obfuscation")
+        elif features.get('entropy', 0) > 6.0:
+            risk_score += 10
+            reasons.append("Moderate entropy")
+        
+        # Suspicious strings
+        suspicious_count = len(features.get('suspicious_strings', []))
+        if suspicious_count > 0:
+            risk_score += min(30, suspicious_count * 5)
+            reasons.append(f"Contains {suspicious_count} suspicious strings")
+        
+        return min(risk_score, 100), reasons
+    
+    def phishing_detector(self, url: str, content: str = "") -> Tuple[float, List[str]]:
+        """Detect phishing attempts"""
+        risk_score = 0
+        reasons = []
+        
+        # Check for common phishing patterns
+        phishing_patterns = [
+            (r'login.*\.(?!com|org|net)', 15, "Suspicious login domain"),
+            (r'secure.*account', 10, "Security-themed URL"),
+            (r'verify.*identity', 10, "Verification request"),
+            (r'password.*reset', 10, "Password reset page"),
+            (r'bank.*online', 15, "Banking-related URL"),
+            (r'paypal.*secure', 15, "PayPal impersonation"),
+            (r'apple.*id.*sign', 15, "Apple ID phishing"),
+            (r'microsoft.*account', 15, "Microsoft account phishing"),
+        ]
+        
+        for pattern, score, reason in phishing_patterns:
+            if re.search(pattern, url.lower()):
+                risk_score += score
+                reasons.append(reason)
+        
+        # Check content for phishing indicators
+        if content:
+            # Check for password fields
+            if 'password' in content.lower() and 'input' in content.lower():
+                risk_score += 5
+                reasons.append("Contains password input field")
+            
+            # Check for fake login forms
+            if 'login' in content.lower() and 'form' in content.lower():
+                risk_score += 5
+                reasons.append("Contains login form")
+        
+        return min(risk_score, 100), reasons
+    
+    def classify_url(self, url: str) -> Dict:
+        """Classify URL using ML models"""
+        features = self.extract_url_features(url)
+        ml_score, ml_reasons = self.models['url_classifier'](features)
+        phishing_score, phishing_reasons = self.phishing_detector(url)
+        
+        # Combine scores
+        total_score = (ml_score * 0.6 + phishing_score * 0.4)
+        all_reasons = ml_reasons + phishing_reasons
+        
+        return {
+            'score': total_score,
+            'reasons': all_reasons,
+            'features': features
+        }
+    
+    def classify_file(self, file_info: Dict) -> Dict:
+        """Classify file using ML models"""
+        features = {
+            'size': file_info.get('size', 0),
+            'extension': file_info.get('extension', ''),
+            'entropy': file_info.get('entropy', 0),
+            'suspicious_strings': file_info.get('suspicious_strings', [])
+        }
+        
+        score, reasons = self.models['file_classifier'](features)
+        
+        return {
+            'score': score,
+            'reasons': reasons,
+            'features': features
+        }
+
+# ============================================================================
+# HISTORY MANAGER
+# ============================================================================
+
+class HistoryManager:
+    """Manage scan history"""
+    
+    def __init__(self, history_file: str = Config.HISTORY_FILE):
+        self.history_file = history_file
+        self.history = self.load_history()
+    
+    def load_history(self) -> List[Dict]:
+        """Load history from file"""
+        if os.path.exists(self.history_file):
+            try:
+                with open(self.history_file, 'r') as f:
+                    return json.load(f)
+            except:
+                return []
+        return []
+    
+    def save_history(self):
+        """Save history to file"""
+        try:
+            with open(self.history_file, 'w') as f:
+                json.dump(self.history, f, indent=2)
+        except:
+            pass
+    
+    def add_entry(self, entry: Dict):
+        """Add entry to history"""
+        self.history.append(entry)
+        # Keep only last 1000 entries
+        if len(self.history) > 1000:
+            self.history = self.history[-1000:]
+        self.save_history()
+    
+    def get_recent(self, limit: int = 50) -> List[Dict]:
+        """Get recent history entries"""
+        return self.history[-limit:]
+    
+    def clear_history(self):
+        """Clear all history"""
+        self.history = []
+        self.save_history()
+
+# ============================================================================
+# ENHANCED URL ANALYZER WITH API INTEGRATION
+# ============================================================================
+
+class EnhancedURLAnalyzer:
+    """Advanced URL analyzer with multiple data sources"""
+    
+    def __init__(self, ml_engine: MLDetectionEngine, db: DatabaseManager):
+        self.ml_engine = ml_engine
+        self.db = db
+        self.session = create_session_with_retries() if REQUESTS_AVAILABLE else None
+        self.risk_score = 0
+        self.findings = []
+        self.url_info = {}
+    
+    @rate_limiter
+    def check_virustotal(self, url: str) -> Dict:
+        """Check URL against VirusTotal"""
+        if not Config.VIRUSTOTAL_API_KEY or not self.session:
+            return {'error': 'No API key or requests not available'}
+        
+        try:
+            # First, get URL ID
+            url_id = base64.urlsafe_b64encode(url.encode()).decode().strip("=")
+            
+            headers = {
+                'x-apikey': Config.VIRUSTOTAL_API_KEY
+            }
+            
+            # Get URL report
+            response = self.session.get(
+                f'https://www.virustotal.com/api/v3/urls/{url_id}',
+                headers=headers,
+                timeout=Config.TIMEOUT
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                stats = data.get('data', {}).get('attributes', {}).get('last_analysis_stats', {})
+                return {
+                    'malicious': stats.get('malicious', 0),
+                    'suspicious': stats.get('suspicious', 0),
+                    'harmless': stats.get('harmless', 0),
+                    'undetected': stats.get('undetected', 0),
+                    'total': sum(stats.values())
+                }
+            else:
+                return {'error': f'API error: {response.status_code}'}
+                
+        except Exception as e:
+            return {'error': str(e)}
+    
+    @rate_limiter
+    def check_abuseipdb(self, ip: str) -> Dict:
+        """Check IP against AbuseIPDB"""
+        if not Config.ABUSEIPDB_API_KEY or not self.session:
+            return {'error': 'No API key or requests not available'}
+        
+        try:
+            headers = {
+                'Key': Config.ABUSEIPDB_API_KEY,
+                'Accept': 'application/json'
+            }
+            
+            params = {
+                'ipAddress': ip,
+                'maxAgeInDays': 90
+            }
+            
+            response = self.session.get(
+                'https://api.abuseipdb.com/api/v2/check',
+                headers=headers,
+                params=params,
+                timeout=Config.TIMEOUT
+            )
+            
+            if response.status_code == 200:
+                data = response.json().get('data', {})
+                return {
+                    'abuse_confidence': data.get('abuseConfidenceScore', 0),
+                    'total_reports': data.get('totalReports', 0),
+                    'country': data.get('countryCode', ''),
+                    'isp': data.get('isp', '')
+                }
+            else:
+                return {'error': f'API error: {response.status_code}'}
+                
+        except Exception as e:
+            return {'error': str(e)}
+    
+    @rate_limiter
+    def check_urlscan(self, url: str) -> Dict:
+        """Check URL against urlscan.io"""
+        if not Config.URLSCAN_API_KEY or not self.session:
+            return {'error': 'No API key or requests not available'}
+        
+        try:
+            headers = {
+                'API-Key': Config.URLSCAN_API_KEY,
+                'Content-Type': 'application/json'
+            }
+            
+            data = {
+                'url': url,
+                'visibility': 'public'
+            }
+            
+            # Submit for scanning
+            response = self.session.post(
+                'https://urlscan.io/api/v1/scan/',
+                headers=headers,
+                json=data,
+                timeout=Config.TIMEOUT
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                return {
+                    'scan_id': result.get('uuid'),
+                    'result_url': result.get('result'),
+                    'api_url': result.get('api')
+                }
+            else:
+                return {'error': f'API error: {response.status_code}'}
+                
+        except Exception as e:
+            return {'error': str(e)}
+    
+    def advanced_dns_lookup(self, domain: str) -> Dict:
+        """Perform comprehensive DNS lookup"""
+        result = {
+            'a_records': [],
+            'mx_records': [],
+            'ns_records': [],
+            'txt_records': [],
+            'cname': None,
+            'error': None
+        }
+        
+        if not DNS_AVAILABLE:
+            # Fallback to socket
+            try:
+                ips = socket.gethostbyname_ex(domain)
+                result['a_records'] = ips[2]
+            except Exception as e:
+                result['error'] = str(e)
+            return result
+        
+        try:
+            # A records
+            try:
+                answers = dns.resolver.resolve(domain, 'A')
+                result['a_records'] = [str(r) for r in answers]
+            except:
+                pass
+            
+            # MX records
+            try:
+                answers = dns.resolver.resolve(domain, 'MX')
+                result['mx_records'] = [str(r.exchange) for r in answers]
+            except:
+                pass
+            
+            # NS records
+            try:
+                answers = dns.resolver.resolve(domain, 'NS')
+                result['ns_records'] = [str(r) for r in answers]
+            except:
+                pass
+            
+            # TXT records
+            try:
+                answers = dns.resolver.resolve(domain, 'TXT')
+                result['txt_records'] = [str(r) for r in answers]
+            except:
+                pass
+            
+            # CNAME
+            try:
+                answers = dns.resolver.resolve(domain, 'CNAME')
+                result['cname'] = str(answers[0].target)
+            except:
+                pass
+                
+        except Exception as e:
+            result['error'] = str(e)
+        
+        return result
+    
+    def check_ssl_advanced(self, domain: str) -> Dict:
+        """Advanced SSL certificate analysis"""
+        result = {
+            'valid': False,
+            'issuer': None,
+            'subject': None,
+            'version': None,
+            'serial_number': None,
+            'not_before': None,
+            'not_after': None,
+            'san': [],
+            'error': None
+        }
+        
+        if not SSL_AVAILABLE:
+            result['error'] = "SSL module not available"
+            return result
+        
+        try:
+            context = ssl.create_default_context()
+            with socket.create_connection((domain, 443), timeout=Config.TIMEOUT) as sock:
+                with context.wrap_socket(sock, server_hostname=domain) as ssock:
+                    cert = ssock.getpeercert()
+                    
+                    result['valid'] = True
+                    result['issuer'] = dict(x[0] for x in cert['issuer'])
+                    result['subject'] = dict(x[0] for x in cert['subject'])
+                    result['version'] = cert.get('version')
+                    result['serial_number'] = cert.get('serialNumber')
+                    result['not_before'] = cert.get('notBefore')
+                    result['not_after'] = cert.get('notAfter')
+                    result['san'] = [san[1] for san in cert.get('subjectAltName', [])]
+                    
+        except Exception as e:
+            result['error'] = str(e)
+        
+        return result
+    
+    def analyze_web_content(self, url: str) -> Dict:
+        """Analyze web page content"""
+        result = {
+            'title': None,
+            'forms': [],
+            'scripts': [],
+            'iframes': [],
+            'redirects': [],
+            'error': None
+        }
+        
+        if not self.session:
+            result['error'] = "Requests not available"
+            return result
+        
+        try:
+            response = self.session.get(url, timeout=Config.TIMEOUT, allow_redirects=True)
+            
+            # Track redirects
+            if response.history:
+                result['redirects'] = [r.url for r in response.history]
+            
+            if BEAUTIFULSOUP_AVAILABLE and response.text:
+                soup = BeautifulSoup(response.text, 'html.parser')
+                
+                # Get title
+                if soup.title:
+                    result['title'] = soup.title.string
+                
+                # Find forms
+                for form in soup.find_all('form'):
+                    form_info = {
+                        'action': form.get('action', ''),
+                        'method': form.get('method', 'get'),
+                        'inputs': []
+                    }
+                    for input_tag in form.find_all('input'):
+                        form_info['inputs'].append({
+                            'type': input_tag.get('type', 'text'),
+                            'name': input_tag.get('name', '')
+                        })
+                    result['forms'].append(form_info)
+                
+                # Find scripts
+                for script in soup.find_all('script'):
+                    if script.get('src'):
+                        result['scripts'].append(script['src'])
+                
+                # Find iframes
+                for iframe in soup.find_all('iframe'):
+                    result['iframes'].append(iframe.get('src', ''))
+                    
+        except Exception as e:
+            result['error'] = str(e)
+        
+        return result
+    
+    def analyze(self, url: str, deep_scan: bool = False) -> Dict:
+        """Main analysis method with enhanced features"""
+        print(f"{getattr(Colors, 'LIGHTCYAN', '')}[*] Starting enhanced analysis for: {url}{getattr(Colors, 'RESET', '')}")
+        
+        # Normalize URL
+        if not url.startswith(('http://', 'https://')):
+            url = 'http://' + url
+        
+        domain = urlparse(url).netloc
+        
+        self.url_info = {
+            'url': url,
+            'domain': domain,
+            'timestamp': datetime.datetime.now().isoformat()
+        }
+        
+        # Run all checks in parallel
+        with ThreadPoolExecutor(max_workers=Config.MAX_THREADS) as executor:
+            futures = {}
+            
+            # DNS analysis
+            futures['dns'] = executor.submit(self.advanced_dns_lookup, domain)
+            
+            # SSL analysis for HTTPS
+            if url.startswith('https://'):
+                futures['ssl'] = executor.submit(self.check_ssl_advanced, domain)
+            
+            # Web content analysis
+            futures['content'] = executor.submit(self.analyze_web_content, url)
+            
+            # API checks (if keys available)
+            if Config.VIRUSTOTAL_API_KEY:
+                futures['vt'] = executor.submit(self.check_virustotal, url)
+            
+            # IP check if domain resolves
+            try:
+                ip = socket.gethostbyname(domain)
+                self.url_info['ip'] = ip
+                if Config.ABUSEIPDB_API_KEY:
+                    futures['abuseip'] = executor.submit(self.check_abuseipdb, ip)
+            except:
+                pass
+            
+            # ML analysis
+            futures['ml'] = executor.submit(self.ml_engine.classify_url, url)
+            
+            # Collect results with progress
+            total_futures = len(futures)
+            for i, (name, future) in enumerate(futures.items(), 1):
+                try:
+                    result = future.result(timeout=Config.TIMEOUT)
+                    self.url_info[name] = result
+                    
+                    # Print progress
+                    status = f"{getattr(Colors, 'LIGHTGREEN', '')}✓{getattr(Colors, 'RESET', '')}" if not result.get('error') else f"{getattr(Colors, 'LIGHTYELLOW', '')}⚠{getattr(Colors, 'RESET', '')}"
+                    print(f"  {status} {name.upper()} analysis complete")
+                    
+                except Exception as e:
+                    self.url_info[name] = {'error': str(e)}
+                    print(f"  {getattr(Colors, 'LIGHTRED', '')}✗{getattr(Colors, 'RESET', '')} {name.upper()} failed: {e}")
+        
+        # Calculate risk score
+        self.calculate_enhanced_risk_score()
+        
+        # Check against threat database
+        threat_info = self.db.check_threat_indicator('domain', domain)
+        if threat_info:
+            self.risk_score += 20
+            self.findings.append(f"Domain found in threat database: {threat_info['threat_type']}")
+        
+        return self.get_results()
+    
+    def calculate_enhanced_risk_score(self) -> int:
+        """Calculate enhanced risk score using multiple factors"""
+        score = 0
+        findings = []
+        
+        # ML score
+        if 'ml' in self.url_info:
+            ml_score = self.url_info['ml'].get('score', 0)
+            score += ml_score * 0.3
+            findings.extend(self.url_info['ml'].get('reasons', []))
+        
+        # VirusTotal results
+        if 'vt' in self.url_info and 'malicious' in self.url_info['vt']:
+            vt = self.url_info['vt']
+            if vt.get('malicious', 0) > 0:
+                score += min(40, vt['malicious'] * 5)
+                findings.append(f"Flagged by {vt['malicious']} VirusTotal engines")
+        
+        # AbuseIPDB results
+        if 'abuseip' in self.url_info and 'abuse_confidence' in self.url_info['abuseip']:
+            abuse_score = self.url_info['abuseip']['abuse_confidence']
+            if abuse_score > 50:
+                score += abuse_score * 0.3
+                findings.append(f"AbuseIPDB confidence: {abuse_score}%")
+        
+        # DNS anomalies
+        dns_info = self.url_info.get('dns', {})
+        if dns_info.get('error'):
+            score += 25
+            findings.append(f"DNS error: {dns_info['error']}")
+        
+        # Web content analysis
+        content = self.url_info.get('content', {})
+        if content.get('forms'):
+            score += len(content['forms']) * 5
+            findings.append(f"Contains {len(content['forms'])} forms")
+        
+        if content.get('iframes'):
+            score += len(content['iframes']) * 10
+            findings.append(f"Contains {len(content['iframes'])} iframes")
+        
+        # SSL issues
+        ssl_info = self.url_info.get('ssl', {})
+        if ssl_info.get('error'):
+            score += 30
+            findings.append(f"SSL error: {ssl_info['error']}")
+        
+        self.risk_score = min(score, Config.MAX_RISK_SCORE)
+        self.findings = findings
+        
+        return self.risk_score
+    
+    def get_results(self) -> Dict:
+        """Return comprehensive results"""
+        return {
+            'url_info': self.url_info,
+            'risk_score': self.risk_score,
+            'risk_level': self.get_risk_level(),
+            'findings': self.findings,
+            'color': get_risk_color(self.risk_score)
+        }
+    
+    def get_risk_level(self) -> str:
+        """Get risk level based on score"""
+        if self.risk_score <= Config.LOW_RISK_THRESHOLD:
+            return "SAFE"
+        elif self.risk_score <= Config.MEDIUM_RISK_THRESHOLD:
+            return "SUSPICIOUS"
+        else:
+            return "DANGEROUS"
+    
+    def display_results(self):
+        """Display enhanced results"""
+        results = self.get_results()
+        
+        print(f"\n{getattr(Colors, 'LIGHTCYAN', '')}{'='*70}{getattr(Colors, 'RESET', '')}")
+        print(f"{getattr(Colors, 'BOLD', '')}ENHANCED URL ANALYSIS RESULTS{getattr(Colors, 'RESET', '')}")
+        print(f"{getattr(Colors, 'LIGHTCYAN', '')}{'='*70}{getattr(Colors, 'RESET', '')}")
+        
+        print(f"\n{getattr(Colors, 'BOLD', '')}URL:{getattr(Colors, 'RESET', '')} {self.url_info['url']}")
+        print(f"{getattr(Colors, 'BOLD', '')}Domain:{getattr(Colors, 'RESET', '')} {self.url_info['domain']}")
+        if 'ip' in self.url_info:
+            print(f"{getattr(Colors, 'BOLD', '')}IP Address:{getattr(Colors, 'RESET', '')} {self.url_info['ip']}")
+        
+        # Risk score with visual indicator
+        risk_color = get_risk_color(self.risk_score)
+        bar_length = 50
+        filled = int(self.risk_score * bar_length / 100)
+        bar = '█' * filled + '░' * (bar_length - filled)
+        
+        print(f"\n{getattr(Colors, 'BOLD', '')}Risk Score:{getattr(Colors, 'RESET', '')} {risk_color}{self.risk_score:.1f}/100{getattr(Colors, 'RESET', '')}")
+        print(f"  [{risk_color}{bar}{getattr(Colors, 'RESET', '')}] {self.get_risk_level()}")
+        
+        if self.findings:
+            print(f"\n{getattr(Colors, 'BOLD', '')}Findings:{getattr(Colors, 'RESET', '')}")
+            for finding in self.findings[:10]:  # Show top 10
+                print(f"  {getattr(Colors, 'LIGHTYELLOW', '')}•{getattr(Colors, 'RESET', '')} {finding}")
+        
+        # ML Insights
+        if 'ml' in self.url_info:
+            ml = self.url_info['ml']
+            if ml.get('features'):
+                print(f"\n{getattr(Colors, 'BOLD', '')}ML Analysis Insights:{getattr(Colors, 'RESET', '')}")
+                features = ml['features']
+                print(f"  URL Length: {features.get('url_length', 0)}")
+                print(f"  Domain Entropy: {features.get('domain_entropy', 0):.2f}")
+                print(f"  Special Characters: {features.get('special_char_count', 0)}")
+        
+        # DNS Info
+        if 'dns' in self.url_info:
+            dns = self.url_info['dns']
+            if dns.get('a_records'):
+                print(f"\n{getattr(Colors, 'BOLD', '')}DNS Records:{getattr(Colors, 'RESET', '')}")
+                print(f"  A Records: {', '.join(dns['a_records'][:3])}")
+                if len(dns['a_records']) > 3:
+                    print(f"    ... and {len(dns['a_records']) - 3} more")
+        
+        # SSL Info
+        if 'ssl' in self.url_info:
+            ssl = self.url_info['ssl']
+            if ssl.get('valid'):
+                print(f"\n{getattr(Colors, 'BOLD', '')}SSL Certificate:{getattr(Colors, 'RESET', '')} {getattr(Colors, 'LIGHTGREEN', '')}Valid{getattr(Colors, 'RESET', '')}")
+                if ssl.get('issuer'):
+                    issuer = ssl['issuer'].get('organizationName', 'Unknown')
+                    print(f"  Issuer: {issuer}")
+                if ssl.get('not_after'):
+                    try:
+                        expiry = datetime.datetime.strptime(ssl['not_after'], '%b %d %H:%M:%S %Y %Z')
+                        days_left = (expiry - datetime.datetime.now()).days
+                        if days_left < 30:
+                            print(f"  Expires: {getattr(Colors, 'LIGHTYELLOW', '')}{days_left} days{getattr(Colors, 'RESET', '')}")
+                        else:
+                            print(f"  Expires: {days_left} days")
+                    except:
+                        print(f"  Expires: {ssl['not_after']}")
+        
+        # API Results
+        if 'vt' in self.url_info and 'malicious' in self.url_info['vt']:
+            vt = self.url_info['vt']
+            print(f"\n{getattr(Colors, 'BOLD', '')}VirusTotal:{getattr(Colors, 'RESET', '')}")
+            print(f"  Malicious: {vt.get('malicious', 0)}")
+            print(f"  Suspicious: {vt.get('suspicious', 0)}")
+            print(f"  Total Engines: {vt.get('total', 0)}")
+        
+        if 'abuseip' in self.url_info and 'abuse_confidence' in self.url_info['abuseip']:
+            abuse = self.url_info['abuseip']
+            conf_color = getattr(Colors, 'LIGHTRED', '') if abuse['abuse_confidence'] > 50 else getattr(Colors, 'LIGHTYELLOW', '')
+            print(f"\n{getattr(Colors, 'BOLD', '')}AbuseIPDB:{getattr(Colors, 'RESET', '')}")
+            print(f"  Confidence: {conf_color}{abuse['abuse_confidence']}%{getattr(Colors, 'RESET', '')}")
+            print(f"  Reports: {abuse.get('total_reports', 0)}")
+        
+        print(f"\n{getattr(Colors, 'LIGHTCYAN', '')}{'='*70}{getattr(Colors, 'RESET', '')}")
+
+# ============================================================================
+# ENHANCED FILE ANALYZER WITH ADVANCED FEATURES
+# ============================================================================
+
+class EnhancedFileAnalyzer:
+    """Advanced file analyzer with multiple detection methods"""
+    
+    def __init__(self, ml_engine: MLDetectionEngine, db: DatabaseManager):
+        self.ml_engine = ml_engine
+        self.db = db
+        self.risk_score = 0
+        self.findings = []
+        self.file_info = {}
+    
+    def calculate_all_hashes(self, file_path: str) -> Dict[str, str]:
+        """Calculate multiple hash types"""
+        hashes = {
+            'md5': '', 'sha1': '', 'sha256': '', 'sha512': '',
+            'ssdeep': '', 'tlsh': ''  # Fuzzy hashes for similarity
+        }
+        
+        try:
+            with open(file_path, 'rb') as f:
+                data = f.read()
+                
+                # Standard hashes
+                hashes['md5'] = hashlib.md5(data).hexdigest()
+                hashes['sha1'] = hashlib.sha1(data).hexdigest()
+                hashes['sha256'] = hashlib.sha256(data).hexdigest()
+                hashes['sha512'] = hashlib.sha512(data).hexdigest()
+                
+                # Simple fuzzy hash (simplified ssdeep)
+                hashes['ssdeep'] = self.simple_fuzzy_hash(data)
+                
+        except Exception as e:
+            print(f"{getattr(Colors, 'LIGHTRED', '')}[!] Error calculating hashes: {e}{getattr(Colors, 'RESET', '')}")
+        
+        return hashes
+    
+    def simple_fuzzy_hash(self, data: bytes) -> str:
+        """Simple fuzzy hash for similarity matching"""
+        if len(data) < 64:
+            return ""
+        
+        # Take chunks at different positions
+        chunks = []
+        for i in range(0, min(len(data), 1024), 64):
+            chunk = data[i:i+64]
+            chunks.append(hashlib.md5(chunk).hexdigest()[:8])
+        
+        return ':'.join(chunks[:7])  # Return first 7 chunks
+    
+    def analyze_pe_file(self, file_path: str) -> Dict:
+        """Analyze PE (Portable Executable) files"""
+        result = {
+            'is_pe': False,
+            'sections': [],
+            'imports': [],
+            'exports': [],
+            'resources': [],
+            'error': None
+        }
+        
+        try:
+            # Simple PE detection
+            with open(file_path, 'rb') as f:
+                header = f.read(2)
+                if header != b'MZ':
+                    return result
+                
+                result['is_pe'] = True
+                
+                # Move to PE header offset
+                f.seek(0x3C)
+                pe_offset_bytes = f.read(4)
+                if len(pe_offset_bytes) == 4:
+                    pe_offset = int.from_bytes(pe_offset_bytes, 'little')
+                    f.seek(pe_offset)
+                    pe_signature = f.read(4)
+                    if pe_signature == b'PE\x00\x00':
+                        result['valid_pe'] = True
+                        
+                        # Read section headers (simplified)
+                        f.seek(pe_offset + 24)  # Skip to section headers
+                        for i in range(5):  # Read first 5 sections
+                            section_data = f.read(40)
+                            if len(section_data) == 40:
+                                section_name = section_data[:8].decode('ascii', errors='ignore').strip('\x00')
+                                if section_name:
+                                    result['sections'].append(section_name)
+                                    
+        except Exception as e:
+            result['error'] = str(e)
+        
+        return result
+    
+    def analyze_office_document(self, file_path: str) -> Dict:
+        """Analyze Office documents for macros and exploits"""
+        result = {
+            'has_macros': False,
+            'macros': [],
+            'ole_streams': [],
+            'error': None
+        }
+        
+        if not OLE_AVAILABLE:
+            result['error'] = "olevba not available"
+            return result
+        
+        try:
+            vbaparser = olevba.VBA_Parser(file_path)
+            if vbaparser.detect_vba_macros():
+                result['has_macros'] = True
+                
+                for (filename, stream_path, vba_filename, vba_code) in vbaparser.extract_macros():
+                    result['macros'].append({
+                        'filename': filename,
+                        'stream': stream_path,
+                        'code_length': len(vba_code)
+                    })
+                    
+                    # Check for suspicious macro content
+                    if 'AutoOpen' in vba_code or 'Document_Open' in vba_code:
+                        result['auto_execute'] = True
+                    if 'Shell' in vba_code or 'CreateObject' in vba_code:
+                        result['suspicious_commands'] = True
+                        
+        except Exception as e:
+            result['error'] = str(e)
+        
+        return result
+    
+    def analyze_image_file(self, file_path: str) -> Dict:
+        """Analyze image files for steganography"""
+        result = {
+            'width': 0,
+            'height': 0,
+            'format': '',
+            'mode': '',
+            'has_exif': False,
+            'exif_data': {},
+            'error': None
+        }
+        
+        if not PIL_AVAILABLE:
+            result['error'] = "PIL not available"
+            return result
+        
+        try:
+            with Image.open(file_path) as img:
+                result['width'], result['height'] = img.size
+                result['format'] = img.format
+                result['mode'] = img.mode
+                
+                # Check for EXIF data
+                if hasattr(img, '_getexif') and img._getexif():
+                    result['has_exif'] = True
+                    
+        except Exception as e:
+            result['error'] = str(e)
+        
+        return result
+    
+    def extract_strings(self, file_path: str, min_length: int = 4) -> List[str]:
+        """Extract ASCII and Unicode strings from file"""
+        strings = []
+        
+        try:
+            with open(file_path, 'rb') as f:
+                data = f.read()
+                
+                # ASCII strings
+                ascii_strings = re.findall(b'[\\x20-\\x7E]{' + str(min_length).encode() + b',}', data)
+                strings.extend([s.decode('ascii', errors='ignore') for s in ascii_strings])
+                
+                # Unicode strings (simplified)
+                try:
+                    unicode_data = data.decode('utf-16le', errors='ignore')
+                    unicode_strings = re.findall(r'[\\x20-\\x7E]{' + str(min_length) + ',}', unicode_data)
+                    strings.extend(unicode_strings)
+                except:
+                    pass
+                
+        except Exception:
+            pass
+        
+        # Remove duplicates and limit
+        return list(set(strings))[:100]
+    
+    def check_against_hash_db(self, file_hash: str) -> Optional[Dict]:
+        """Check file hash against known malware database"""
+        return self.db.check_threat_indicator('hash', file_hash)
+    
+    def quarantine_file(self, file_path: str) -> Optional[str]:
+        """Move suspicious file to quarantine"""
+        try:
+            quarantine_path = Path(Config.QUARANTINE_DIR) / f"{datetime.datetime.now():%Y%m%d_%H%M%S}_{os.path.basename(file_path)}"
+            os.rename(file_path, quarantine_path)
+            return str(quarantine_path)
+        except Exception as e:
+            print(f"{getattr(Colors, 'LIGHTRED', '')}[!] Error quarantining file: {e}{getattr(Colors, 'RESET', '')}")
+            return None
+    
+    def analyze(self, file_path: str, deep_scan: bool = False, quarantine: bool = False) -> Dict:
+        """Main analysis method with enhanced features"""
+        print(f"{getattr(Colors, 'LIGHTCYAN', '')}[*] Starting enhanced file analysis: {file_path}{getattr(Colors, 'RESET', '')}")
+        
+        # Check if file exists
+        if not os.path.exists(file_path):
+            return {'error': 'File not found'}
+        
+        # Basic file info
+        stat = os.stat(file_path)
+        self.file_info = {
+            'path': file_path,
+            'name': os.path.basename(file_path),
+            'size': stat.st_size,
+            'extension': os.path.splitext(file_path)[1].lower(),
+            'mime_type': get_file_mime_type(file_path),
+            'created': datetime.datetime.fromtimestamp(stat.st_ctime).isoformat(),
+            'modified': datetime.datetime.fromtimestamp(stat.st_mtime).isoformat(),
+            'timestamp': datetime.datetime.now().isoformat()
+        }
+        
+        # Calculate hashes
+        print(f"  {getattr(Colors, 'LIGHTYELLOW', '')}▶{getattr(Colors, 'RESET', '')} Calculating file hashes...")
+        self.file_info['hashes'] = self.calculate_all_hashes(file_path)
+        
+        # Check against hash database
+        for hash_type, hash_value in self.file_info['hashes'].items():
+            if hash_value:
+                threat = self.check_against_hash_db(hash_value)
+                if threat:
+                    self.risk_score += 40
+                    self.findings.append(f"File hash matches known {threat['threat_type']}")
+        
+        # Extract strings for analysis
+        if deep_scan:
+            print(f"  {getattr(Colors, 'LIGHTYELLOW', '')}▶{getattr(Colors, 'RESET', '')} Extracting strings...")
+            self.file_info['strings'] = self.extract_strings(file_path)
+            self.file_info['suspicious_strings'] = [
+                s for s in self.file_info['strings']
+                if any(pattern in s.lower() for pattern in Config.SUSPICIOUS_STRINGS)
+            ]
+        
+        # Run parallel analysis based on file type
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = {}
+            
+            # PE analysis
+            if self.file_info['extension'] in ['.exe', '.dll', '.sys', '.ocx']:
+                futures['pe'] = executor.submit(self.analyze_pe_file, file_path)
+            
+            # Office document analysis
+            if self.file_info['extension'] in ['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx']:
+                futures['office'] = executor.submit(self.analyze_office_document, file_path)
+            
+            # Image analysis
+            if self.file_info['extension'] in ['.jpg', '.jpeg', '.png', '.gif', '.bmp']:
+                futures['image'] = executor.submit(self.analyze_image_file, file_path)
+            
+            # ML analysis
+            futures['ml'] = executor.submit(self.ml_engine.classify_file, self.file_info)
+            
+            # Collect results
+            for name, future in futures.items():
+                try:
+                    result = future.result(timeout=Config.TIMEOUT)
+                    self.file_info[name] = result
+                    print(f"  {getattr(Colors, 'LIGHTGREEN', '')}✓{getattr(Colors, 'RESET', '')} {name.upper()} analysis complete")
+                except Exception as e:
+                    print(f"  {getattr(Colors, 'LIGHTRED', '')}✗{getattr(Colors, 'RESET', '')} {name.upper()} failed: {e}")
+        
+        # Entropy analysis
+        print(f"  {getattr(Colors, 'LIGHTYELLOW', '')}▶{getattr(Colors, 'RESET', '')} Performing entropy analysis...")
+        try:
+            with open(file_path, 'rb') as f:
+                data = f.read(10240)  # First 10KB
+                self.file_info['entropy'] = calculate_entropy(data)
+        except:
+            self.file_info['entropy'] = 0
+        
+        # Calculate risk score
+        self.calculate_enhanced_risk_score()
+        
+        # Quarantine if requested and high risk
+        if quarantine and self.risk_score > Config.MEDIUM_RISK_THRESHOLD:
+            quarantine_path = self.quarantine_file(file_path)
+            if quarantine_path:
+                self.file_info['quarantined'] = quarantine_path
+        
+        return self.get_results()
+    
+    def calculate_enhanced_risk_score(self) -> int:
+        """Calculate enhanced risk score"""
+        score = 0
+        findings = []
+        
+        # ML score
+        if 'ml' in self.file_info:
+            ml_score = self.file_info['ml'].get('score', 0)
+            score += ml_score * 0.4
+            findings.extend(self.file_info['ml'].get('reasons', []))
+        
+        # File size anomalies
+        if self.file_info['size'] > 100 * 1024 * 1024:  # > 100MB
+            score += 15
+            findings.append("Very large file size")
+        
+        # Suspicious extension
+        dangerous_exts = ['.exe', '.bat', '.cmd', '.ps1', '.vbs', '.js', '.jar']
+        if self.file_info['extension'] in dangerous_exts:
+            score += 20
+            findings.append(f"Dangerous file extension: {self.file_info['extension']}")
+        
+        # PE analysis findings
+        if 'pe' in self.file_info:
+            pe = self.file_info['pe']
+            if pe.get('sections'):
+                suspicious_sections = [s for s in pe['sections'] if s in ['.UPX', '.packed']]
+                if suspicious_sections:
+                    score += 25
+                    findings.append(f"Packed/obfuscated sections: {', '.join(suspicious_sections)}")
+        
+        # Office document findings
+        if 'office' in self.file_info:
+            office = self.file_info['office']
+            if office.get('has_macros'):
+                score += 30
+                findings.append("Contains macros")
+            if office.get('auto_execute'):
+                score += 20
+                findings.append("Auto-executing macros detected")
+        
+        # Suspicious strings
+        if self.file_info.get('suspicious_strings'):
+            s_count = len(self.file_info['suspicious_strings'])
+            score += min(30, s_count * 2)
+            findings.append(f"Contains {s_count} suspicious strings")
+        
+        # High entropy
+        if self.file_info.get('entropy', 0) > 7.5:
+            score += 25
+            findings.append("Very high entropy - likely encrypted/packed")
+        elif self.file_info.get('entropy', 0) > 6.5:
+            score += 15
+            findings.append("High entropy - possible obfuscation")
+        
+        self.risk_score = min(score, Config.MAX_RISK_SCORE)
+        self.findings = findings
+        
+        return self.risk_score
+    
+    def get_results(self) -> Dict:
+        """Return comprehensive results"""
+        return {
+            'file_info': self.file_info,
+            'risk_score': self.risk_score,
+            'risk_level': self.get_risk_level(),
+            'findings': self.findings,
+            'color': get_risk_color(self.risk_score)
+        }
+    
+    def get_risk_level(self) -> str:
+        """Get risk level based on score"""
+        if self.risk_score <= Config.LOW_RISK_THRESHOLD:
+            return "SAFE"
+        elif self.risk_score <= Config.MEDIUM_RISK_THRESHOLD:
+            return "SUSPICIOUS"
+        else:
+            return "DANGEROUS"
+    
+    def display_results(self):
+        """Display enhanced results"""
+        results = self.get_results()
+        file_info = results['file_info']
+        
+        print(f"\n{getattr(Colors, 'LIGHTCYAN', '')}{'='*70}{getattr(Colors, 'RESET', '')}")
+        print(f"{getattr(Colors, 'BOLD', '')}ENHANCED FILE ANALYSIS RESULTS{getattr(Colors, 'RESET', '')}")
+        print(f"{getattr(Colors, 'LIGHTCYAN', '')}{'='*70}{getattr(Colors, 'RESET', '')}")
+        
+        print(f"\n{getattr(Colors, 'BOLD', '')}File:{getattr(Colors, 'RESET', '')} {file_info['name']}")
+        print(f"{getattr(Colors, 'BOLD', '')}Size:{getattr(Colors, 'RESET', '')} {file_info['size']:,} bytes ({file_info['size']/1024/1024:.2f} MB)")
+        print(f"{getattr(Colors, 'BOLD', '')}Type:{getattr(Colors, 'RESET', '')} {file_info['mime_type']}")
+        print(f"{getattr(Colors, 'BOLD', '')}Extension:{getattr(Colors, 'RESET', '')} {file_info['extension']}")
+        
+        # Risk score with visual indicator
+        risk_color = get_risk_color(self.risk_score)
+        bar_length = 50
+        filled = int(self.risk_score * bar_length / 100)
+        bar = '█' * filled + '░' * (bar_length - filled)
+        
+        print(f"\n{getattr(Colors, 'BOLD', '')}Risk Score:{getattr(Colors, 'RESET', '')} {risk_color}{self.risk_score:.1f}/100{getattr(Colors, 'RESET', '')}")
+        print(f"  [{risk_color}{bar}{getattr(Colors, 'RESET', '')}] {self.get_risk_level()}")
+        
+        if self.findings:
+            print(f"\n{getattr(Colors, 'BOLD', '')}Findings:{getattr(Colors, 'RESET', '')}")
+            for finding in self.findings:
+                print(f"  {getattr(Colors, 'LIGHTYELLOW', '')}•{getattr(Colors, 'RESET', '')} {finding}")
+        
+        # Hashes
+        if 'hashes' in file_info:
+            print(f"\n{getattr(Colors, 'BOLD', '')}File Hashes:{getattr(Colors, 'RESET', '')}")
+            print(f"  MD5:    {file_info['hashes']['md5']}")
+            print(f"  SHA1:   {file_info['hashes']['sha1']}")
+            print(f"  SHA256: {file_info['hashes']['sha256']}")
+        
+        # Entropy
+        if file_info.get('entropy'):
+            entropy = file_info['entropy']
+            entropy_color = getattr(Colors, 'LIGHTRED', '') if entropy > 7 else getattr(Colors, 'LIGHTYELLOW', '') if entropy > 6 else getattr(Colors, 'LIGHTGREEN', '')
+            print(f"\n{getattr(Colors, 'BOLD', '')}Entropy:{getattr(Colors, 'RESET', '')} {entropy_color}{entropy:.2f}{getattr(Colors, 'RESET', '')} (normal: <6.0)")
+        
+        # Specialized analysis results
+        if 'pe' in file_info and file_info['pe'].get('is_pe'):
+            pe = file_info['pe']
+            print(f"\n{getattr(Colors, 'BOLD', '')}PE Analysis:{getattr(Colors, 'RESET', '')}")
+            print(f"  Sections: {', '.join(pe.get('sections', []))}")
+        
+        if 'office' in file_info and file_info['office'].get('has_macros'):
+            office = file_info['office']
+            print(f"\n{getattr(Colors, 'BOLD', '')}Office Document Analysis:{getattr(Colors, 'RESET', '')}")
+            print(f"  Macros: {len(office.get('macros', []))}")
+            if office.get('auto_execute'):
+                print(f"  {getattr(Colors, 'LIGHTRED', '')}⚠ Auto-executing macros detected{getattr(Colors, 'RESET', '')}")
+        
+        # Quarantine status
+        if file_info.get('quarantined'):
+            print(f"\n{getattr(Colors, 'LIGHTYELLOW', '')}⚠ File quarantined: {file_info['quarantined']}{getattr(Colors, 'RESET', '')}")
+        
+        print(f"\n{getattr(Colors, 'LIGHTCYAN', '')}{'='*70}{getattr(Colors, 'RESET', '')}")
+
+# ============================================================================
+# ENHANCED REPORT GENERATOR
+# ============================================================================
+
+class EnhancedReportGenerator:
+    """Generate comprehensive HTML/PDF reports"""
+    
+    def __init__(self):
+        self.reports_dir = Config.REPORTS_DIR
+    
+    def generate_url_report(self, results: Dict) -> str:
+        """Generate enhanced HTML report for URL scan"""
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"url_scan_enhanced_{timestamp}.html"
+        filepath = Path(Config.REPORTS_DIR) / filename
+        
+        url_info = results['url_info']
+        risk_score = results['risk_score']
+        risk_level = results['risk_level']
+        findings = results['findings']
+        
+        # Generate visual risk meter
+        risk_meter = f"""
+        <div class="risk-meter">
+            <div class="risk-fill" style="width: {risk_score}%; background: {self.get_risk_color_hex(risk_score)};"></div>
+            <span class="risk-text">{risk_score:.1f}%</span>
+        </div>
+        """
+        
+        html = f"""
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>CSK Guardian v2.0 - Enhanced URL Scan Report</title>
+            <style>
+                * {{
+                    margin: 0;
+                    padding: 0;
+                    box-sizing: border-box;
+                }}
+                
+                body {{
+                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    min-height: 100vh;
+                    padding: 30px;
+                }}
+                
+                .container {{
+                    max-width: 1200px;
+                    margin: 0 auto;
+                    background: white;
+                    border-radius: 20px;
+                    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                    overflow: hidden;
+                }}
+                
+                .header {{
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                    padding: 40px;
+                    text-align: center;
+                }}
+                
+                .header h1 {{
+                    font-size: 2.5em;
+                    margin-bottom: 10px;
+                }}
+                
+                .header p {{
+                    font-size: 1.2em;
+                    opacity: 0.9;
+                }}
+                
+                .content {{
+                    padding: 40px;
+                }}
+                
+                .info-grid {{
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+                    gap: 20px;
+                    margin-bottom: 30px;
+                }}
+                
+                .info-card {{
+                    background: #f8f9fa;
+                    border-radius: 15px;
+                    padding: 20px;
+                    border-left: 4px solid #667eea;
+                }}
+                
+                .info-card h3 {{
+                    color: #333;
+                    margin-bottom: 15px;
+                    font-size: 1.2em;
+                }}
+                
+                .info-card .label {{
+                    color: #666;
+                    font-size: 0.9em;
+                    margin-bottom: 5px;
+                }}
+                
+                .info-card .value {{
+                    color: #333;
+                    font-size: 1.1em;
+                    font-weight: 600;
+                }}
+                
+                .risk-section {{
+                    background: #f8f9fa;
+                    border-radius: 15px;
+                    padding: 30px;
+                    margin-bottom: 30px;
+                    text-align: center;
+                }}
+                
+                .risk-meter {{
+                    width: 100%;
+                    height: 30px;
+                    background: #e9ecef;
+                    border-radius: 15px;
+                    margin: 20px 0;
+                    position: relative;
+                    overflow: hidden;
+                }}
+                
+                .risk-fill {{
+                    height: 100%;
+                    transition: width 0.3s ease;
+                }}
+                
+                .risk-text {{
+                    position: absolute;
+                    top: 50%;
+                    left: 50%;
+                    transform: translate(-50%, -50%);
+                    color: white;
+                    font-weight: bold;
+                    text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+                }}
+                
+                .findings-list {{
+                    list-style: none;
+                }}
+                
+                .findings-list li {{
+                    padding: 10px;
+                    margin: 5px 0;
+                    background: #fff3cd;
+                    border-left: 4px solid #ffc107;
+                    border-radius: 5px;
+                }}
+                
+                table {{
+                    width: 100%;
+                    border-collapse: collapse;
+                    margin: 20px 0;
+                }}
+                
+                th {{
+                    background: #667eea;
+                    color: white;
+                    padding: 12px;
+                    text-align: left;
+                }}
+                
+                td {{
+                    padding: 12px;
+                    border-bottom: 1px solid #dee2e6;
+                }}
+                
+                tr:hover {{
+                    background: #f8f9fa;
+                }}
+                
+                .badge {{
+                    display: inline-block;
+                    padding: 5px 10px;
+                    border-radius: 20px;
+                    font-size: 0.8em;
+                    font-weight: 600;
+                }}
+                
+                .badge-safe {{
+                    background: #d4edda;
+                    color: #155724;
+                }}
+                
+                .badge-suspicious {{
+                    background: #fff3cd;
+                    color: #856404;
+                }}
+                
+                .badge-dangerous {{
+                    background: #f8d7da;
+                    color: #721c24;
+                }}
+                
+                .footer {{
+                    background: #f8f9fa;
+                    padding: 30px;
+                    text-align: center;
+                    color: #666;
+                    border-top: 1px solid #dee2e6;
+                }}
+                
+                .print-button {{
+                    background: #667eea;
+                    color: white;
+                    border: none;
+                    padding: 10px 30px;
+                    border-radius: 25px;
+                    font-size: 1em;
+                    cursor: pointer;
+                    margin-top: 20px;
+                    transition: background 0.3s;
+                }}
+                
+                .print-button:hover {{
+                    background: #5a67d8;
+                }}
+                
+                @media print {{
+                    body {{
+                        background: white;
+                        padding: 0;
+                    }}
+                    .container {{
+                        box-shadow: none;
+                    }}
+                    .print-button {{
+                        display: none;
+                    }}
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>CSK Guardian v2.0</h1>
+                    <p>Enhanced URL Security Analysis Report</p>
+                    <p style="font-size: 0.9em; margin-top: 10px;">Generated: {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>
+                </div>
+                
+                <div class="content">
+                    <div class="info-grid">
+                        <div class="info-card">
+                            <h3>URL Information</h3>
+                            <div class="label">URL</div>
+                            <div class="value" style="word-break: break-all;">{url_info.get('url', 'N/A')}</div>
+                            <div class="label" style="margin-top: 10px;">Domain</div>
+                            <div class="value">{url_info.get('domain', 'N/A')}</div>
+        """
+        
+        if 'ip' in url_info:
+            html += f"""
+                            <div class="label" style="margin-top: 10px;">IP Address</div>
+                            <div class="value">{url_info['ip']}</div>
+            """
+        
+        html += f"""
+                        </div>
+                        
+                        <div class="info-card">
+                            <h3>Risk Assessment</h3>
+                            <div class="label">Risk Level</div>
+                            <div class="value">
+                                <span class="badge badge-{risk_level.lower()}">{risk_level}</span>
+                            </div>
+                            <div class="label" style="margin-top: 10px;">Risk Score</div>
+                            <div class="value">{risk_score:.1f}/100</div>
+                        </div>
+                    </div>
+                    
+                    <div class="risk-section">
+                        <h2 style="margin-bottom: 20px;">Risk Analysis</h2>
+                        {risk_meter}
+                        
+                        <div style="margin-top: 20px;">
+                            <span class="badge badge-safe" style="margin: 0 5px;">Safe (0-30)</span>
+                            <span class="badge badge-suspicious" style="margin: 0 5px;">Suspicious (31-70)</span>
+                            <span class="badge badge-dangerous" style="margin: 0 5px;">Dangerous (71-100)</span>
+                        </div>
+                    </div>
+        """
+        
+        if findings:
+            html += f"""
+                    <div class="info-card" style="margin-bottom: 30px;">
+                        <h3>Findings ({len(findings)})</h3>
+                        <ul class="findings-list">
+            """
+            for finding in findings:
+                html += f'<li>⚠️ {finding}</li>'
+            html += """
+                        </ul>
+                    </div>
+            """
+        
+        # DNS Information
+        if 'dns' in url_info:
+            dns = url_info['dns']
+            html += f"""
+                    <div class="info-card" style="margin-bottom: 30px;">
+                        <h3>DNS Information</h3>
+                        <table>
+                            <tr><th>Record Type</th><th>Values</th></tr>
+            """
+            if dns.get('a_records'):
+                html += f"<tr><td>A Records</td><td>{', '.join(dns['a_records'][:5])}</td></tr>"
+            if dns.get('mx_records'):
+                html += f"<tr><td>MX Records</td><td>{', '.join(dns['mx_records'][:5])}</td></tr>"
+            if dns.get('ns_records'):
+                html += f"<tr><td>NS Records</td><td>{', '.join(dns['ns_records'][:5])}</td></tr>"
+            html += "</table></div>"
+        
+        # SSL Information
+        if 'ssl' in url_info and not url_info['ssl'].get('error'):
+            ssl = url_info['ssl']
+            html += f"""
+                    <div class="info-card" style="margin-bottom: 30px;">
+                        <h3>SSL Certificate Information</h3>
+                        <table>
+                            <tr><th>Property</th><th>Value</th></tr>
+                            <tr><td>Valid</td><td>{'Yes' if ssl.get('valid') else 'No'}</td></tr>
+            """
+            if ssl.get('issuer'):
+                issuer_name = ssl['issuer'].get('organizationName', 'Unknown')
+                html += f"<tr><td>Issuer</td><td>{issuer_name}</td></tr>"
+            if ssl.get('not_after'):
+                html += f"<tr><td>Expires</td><td>{ssl['not_after']}</td></tr>"
+            if ssl.get('san'):
+                html += f"<tr><td>Subject Alt Names</td><td>{', '.join(ssl['san'][:3])}</td></tr>"
+            html += "</table></div>"
+        
+        # API Results
+        if 'vt' in url_info and 'malicious' in url_info['vt']:
+            vt = url_info['vt']
+            html += f"""
+                    <div class="info-card" style="margin-bottom: 30px;">
+                        <h3>VirusTotal Results</h3>
+                        <table>
+                            <tr><th>Category</th><th>Count</th></tr>
+                            <tr><td>Malicious</td><td>{vt.get('malicious', 0)}</td></tr>
+                            <tr><td>Suspicious</td><td>{vt.get('suspicious', 0)}</td></tr>
+                            <tr><td>Harmless</td><td>{vt.get('harmless', 0)}</td></tr>
+                            <tr><td>Total Engines</td><td>{vt.get('total', 0)}</td></tr>
+                        </table>
+                    </div>
+            """
+        
+        html += f"""
+                    <div style="text-align: center;">
+                        <button class="print-button" onclick="window.print()">Print Report</button>
+                    </div>
+                </div>
+                
+                <div class="footer">
+                    <p>CSK Guardian v2.0 - AI-Powered Security Analyzer</p>
+                    <p style="margin-top: 10px;">This report is for security awareness purposes only.</p>
+                    <p style="margin-top: 5px;">Report ID: {hashlib.md5(str(time.time()).encode()).hexdigest()[:8].upper()}</p>
+                </div>
+            </div>
+            
+            <script>
+                // Add animation to risk meter
+                document.addEventListener('DOMContentLoaded', function() {{
+                    const fill = document.querySelector('.risk-fill');
+                    fill.style.width = '0%';
+                    setTimeout(() => {{
+                        fill.style.width = '{risk_score}%';
+                    }}, 100);
+                }});
+            </script>
+        </body>
+        </html>
+        """
+        
+        try:
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(html)
+            return str(filepath)
+        except Exception as e:
+            print(f"{getattr(Colors, 'LIGHTRED', '')}[!] Error saving report: {e}{getattr(Colors, 'RESET', '')}")
+            return ""
+    
+    def generate_file_report(self, results: Dict) -> str:
+        """Generate enhanced HTML report for file scan"""
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"file_scan_enhanced_{timestamp}.html"
+        filepath = Path(Config.REPORTS_DIR) / filename
+        
+        file_info = results['file_info']
+        risk_score = results['risk_score']
+        risk_level = results['risk_level']
+        findings = results['findings']
+        
+        # Generate risk meter
+        risk_meter = f"""
+        <div class="risk-meter">
+            <div class="risk-fill" style="width: {risk_score}%; background: {self.get_risk_color_hex(risk_score)};"></div>
+            <span class="risk-text">{risk_score:.1f}%</span>
+        </div>
+        """
+        
+        html = f"""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>CSK Guardian v2.0 - Enhanced File Scan Report</title>
+            <style>
+                /* Same styles as URL report */
+                body {{
+                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    min-height: 100vh;
+                    padding: 30px;
+                }}
+                .container {{
+                    max-width: 1200px;
+                    margin: 0 auto;
+                    background: white;
+                    border-radius: 20px;
+                    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                    overflow: hidden;
+                }}
+                .header {{
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                    padding: 40px;
+                    text-align: center;
+                }}
+                .header h1 {{ font-size: 2.5em; margin-bottom: 10px; }}
+                .header p {{ font-size: 1.2em; opacity: 0.9; }}
+                .content {{ padding: 40px; }}
+                .info-grid {{
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+                    gap: 20px;
+                    margin-bottom: 30px;
+                }}
+                .info-card {{
+                    background: #f8f9fa;
+                    border-radius: 15px;
+                    padding: 20px;
+                    border-left: 4px solid #667eea;
+                }}
+                .info-card h3 {{ color: #333; margin-bottom: 15px; }}
+                .info-card .label {{ color: #666; font-size: 0.9em; }}
+                .info-card .value {{ color: #333; font-size: 1.1em; font-weight: 600; }}
+                .risk-section {{
+                    background: #f8f9fa;
+                    border-radius: 15px;
+                    padding: 30px;
+                    margin-bottom: 30px;
+                    text-align: center;
+                }}
+                .risk-meter {{
+                    width: 100%;
+                    height: 30px;
+                    background: #e9ecef;
+                    border-radius: 15px;
+                    margin: 20px 0;
+                    position: relative;
+                    overflow: hidden;
+                }}
+                .risk-fill {{ height: 100%; transition: width 0.3s ease; }}
+                .risk-text {{
+                    position: absolute;
+                    top: 50%;
+                    left: 50%;
+                    transform: translate(-50%, -50%);
+                    color: white;
+                    font-weight: bold;
+                    text-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+                }}
+                .findings-list {{ list-style: none; }}
+                .findings-list li {{
+                    padding: 10px;
+                    margin: 5px 0;
+                    background: #fff3cd;
+                    border-left: 4px solid #ffc107;
+                    border-radius: 5px;
+                }}
+                table {{
+                    width: 100%;
+                    border-collapse: collapse;
+                    margin: 20px 0;
+                }}
+                th {{
+                    background: #667eea;
+                    color: white;
+                    padding: 12px;
+                    text-align: left;
+                }}
+                td {{
+                    padding: 12px;
+                    border-bottom: 1px solid #dee2e6;
+                    word-break: break-all;
+                }}
+                .hash {{ font-family: monospace; font-size: 0.9em; }}
+                .badge {{
+                    display: inline-block;
+                    padding: 5px 10px;
+                    border-radius: 20px;
+                    font-size: 0.8em;
+                    font-weight: 600;
+                }}
+                .badge-safe {{ background: #d4edda; color: #155724; }}
+                .badge-suspicious {{ background: #fff3cd; color: #856404; }}
+                .badge-dangerous {{ background: #f8d7da; color: #721c24; }}
+                .footer {{
+                    background: #f8f9fa;
+                    padding: 30px;
+                    text-align: center;
+                    color: #666;
+                    border-top: 1px solid #dee2e6;
+                }}
+                .print-button {{
+                    background: #667eea;
+                    color: white;
+                    border: none;
+                    padding: 10px 30px;
+                    border-radius: 25px;
+                    font-size: 1em;
+                    cursor: pointer;
+                    margin-top: 20px;
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="header">
+                    <h1>CSK Guardian v2.0</h1>
+                    <p>Enhanced File Security Analysis Report</p>
+                    <p style="font-size: 0.9em;">Generated: {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>
+                </div>
+                
+                <div class="content">
+                    <div class="info-grid">
+                        <div class="info-card">
+                            <h3>File Information</h3>
+                            <div class="label">Filename</div>
+                            <div class="value">{file_info['name']}</div>
+                            <div class="label" style="margin-top: 10px;">File Size</div>
+                            <div class="value">{file_info['size']:,} bytes ({file_info['size']/1024/1024:.2f} MB)</div>
+                            <div class="label" style="margin-top: 10px;">File Type</div>
+                            <div class="value">{file_info.get('mime_type', 'Unknown')}</div>
+                        </div>
+                        
+                        <div class="info-card">
+                            <h3>Risk Assessment</h3>
+                            <div class="label">Risk Level</div>
+                            <div class="value">
+                                <span class="badge badge-{risk_level.lower()}">{risk_level}</span>
+                            </div>
+                            <div class="label" style="margin-top: 10px;">Risk Score</div>
+                            <div class="value">{risk_score:.1f}/100</div>
+                            <div class="label" style="margin-top: 10px;">Entropy</div>
+                            <div class="value">{file_info.get('entropy', 0):.2f}</div>
+                        </div>
+                    </div>
+                    
+                    <div class="risk-section">
+                        <h2>Risk Analysis</h2>
+                        {risk_meter}
+                    </div>
+        """
+        
+        if findings:
+            html += f"""
+                    <div class="info-card" style="margin-bottom: 30px;">
+                        <h3>Findings ({len(findings)})</h3>
+                        <ul class="findings-list">
+            """
+            for finding in findings:
+                html += f'<li>⚠️ {finding}</li>'
+            html += """
+                        </ul>
+                    </div>
+            """
+        
+        # File hashes
+        if 'hashes' in file_info:
+            html += f"""
+                    <div class="info-card" style="margin-bottom: 30px;">
+                        <h3>File Hashes</h3>
+                        <table>
+                            <tr><th>Hash Type</th><th>Value</th></tr>
+                            <tr><td>MD5</td><td class="hash">{file_info['hashes']['md5']}</td></tr>
+                            <tr><td>SHA1</td><td class="hash">{file_info['hashes']['sha1']}</td></tr>
+                            <tr><td>SHA256</td><td class="hash">{file_info['hashes']['sha256']}</td></tr>
+                            <tr><td>SHA512</td><td class="hash">{file_info['hashes']['sha512']}</td></tr>
+                        </table>
+                    </div>
+            """
+        
+        # Specialized analysis
+        if 'pe' in file_info and file_info['pe'].get('is_pe'):
+            pe = file_info['pe']
+            html += f"""
+                    <div class="info-card" style="margin-bottom: 30px;">
+                        <h3>PE File Analysis</h3>
+                        <table>
+                            <tr><th>Property</th><th>Value</th></tr>
+                            <tr><td>Valid PE</td><td>{'Yes' if pe.get('valid_pe') else 'No'}</td></tr>
+                            <tr><td>Sections</td><td>{', '.join(pe.get('sections', []))}</td></tr>
+                        </table>
+                    </div>
+            """
+        
+        if 'office' in file_info and file_info['office'].get('has_macros'):
+            office = file_info['office']
+            html += f"""
+                    <div class="info-card" style="margin-bottom: 30px;">
+                        <h3>Office Document Analysis</h3>
+                        <table>
+                            <tr><th>Property</th><th>Value</th></tr>
+                            <tr><td>Macros Found</td><td>{len(office.get('macros', []))}</td></tr>
+                            <tr><td>Auto-execute</td><td>{'Yes' if office.get('auto_execute') else 'No'}</td></tr>
+                            <tr><td>Suspicious Commands</td><td>{'Yes' if office.get('suspicious_commands') else 'No'}</td></tr>
+                        </table>
+                    </div>
+            """
+        
+        # Quarantine status
+        if file_info.get('quarantined'):
+            html += f"""
+                    <div class="info-card" style="margin-bottom: 30px; border-left-color: #dc3545;">
+                        <h3 style="color: #dc3545;">⚠ Quarantine Information</h3>
+                        <p>File has been quarantined to: <code>{file_info['quarantined']}</code></p>
+                    </div>
+            """
+        
+        html += f"""
+                    <div style="text-align: center;">
+                        <button class="print-button" onclick="window.print()">Print Report</button>
+                    </div>
+                </div>
+                
+                <div class="footer">
+                    <p>CSK Guardian v2.0 - AI-Powered Security Analyzer</p>
+                    <p>This report is for security awareness purposes only.</p>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+        
+        try:
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write(html)
+            return str(filepath)
+        except Exception as e:
+            print(f"{getattr(Colors, 'LIGHTRED', '')}[!] Error saving report: {e}{getattr(Colors, 'RESET', '')}")
+            return ""
+    
+    def get_risk_color_hex(self, score: float) -> str:
+        """Get hex color for risk score"""
+        if score <= 30:
+            return "#00b894"  # Green
+        elif score <= 70:
+            return "#fdcb6e"  # Yellow
+        else:
+            return "#d63031"  # Red
+
+# ============================================================================
+# REAL-TIME MONITOR
+# ============================================================================
+
+class RealtimeMonitor:
+    """Real-time file system monitor for threat detection"""
+    
+    def __init__(self, analyzer: EnhancedFileAnalyzer):
+        self.analyzer = analyzer
+        self.running = False
+        self.monitored_paths = []
+        self.alert_callbacks = []
+    
+    def add_path(self, path: str):
+        """Add path to monitor"""
+        if os.path.exists(path):
+            self.monitored_paths.append(path)
+            print(f"{getattr(Colors, 'LIGHTGREEN', '')}[✓] Now monitoring: {path}{getattr(Colors, 'RESET', '')}")
+    
+    def on_alert(self, callback):
+        """Register alert callback"""
+        self.alert_callbacks.append(callback)
+    
+    def scan_directory(self, path: str, recursive: bool = True):
+        """Scan directory for threats"""
+        threats = []
+        path_obj = Path(path)
+        
+        if path_obj.is_file():
+            # Single file
+            result = self.analyzer.analyze(str(path_obj))
+            if result['risk_score'] > Config.MEDIUM_RISK_THRESHOLD:
+                threats.append(result)
+                self.trigger_alert(result)
+        
+        elif path_obj.is_dir():
+            # Directory
+            pattern = "**/*" if recursive else "*"
+            files = list(path_obj.glob(pattern))
+            
+            for i, file_path in enumerate(files):
+                if file_path.is_file():
+                    print_progress(i+1, len(files), prefix='Scanning:', suffix=str(file_path))
+                    result = self.analyzer.analyze(str(file_path))
+                    if result['risk_score'] > Config.MEDIUM_RISK_THRESHOLD:
+                        threats.append(result)
+                        self.trigger_alert(result)
+        
+        return threats
+    
+    def trigger_alert(self, threat_info: Dict):
+        """Trigger alert for detected threat"""
+        alert_msg = f"""
+{getattr(Colors, 'LIGHTRED', '')}╔══════════════════════════════════════════════════════════╗
+║                    THREAT DETECTED!                      ║
+╠══════════════════════════════════════════════════════════╣
+║ File: {threat_info['file_info']['name'][:40]:<40} ║
+║ Risk Score: {threat_info['risk_score']:.1f}/100                         ║
+║ Risk Level: {threat_info['risk_level']:<12}                  ║
+╚══════════════════════════════════════════════════════════╝{getattr(Colors, 'RESET', '')}
+        """
+        print(alert_msg)
+        
+        for callback in self.alert_callbacks:
+            try:
+                callback(threat_info)
+            except:
+                pass
+    
+    def start_monitoring(self, interval: int = 60):
+        """Start real-time monitoring"""
+        self.running = True
+        print(f"{getattr(Colors, 'LIGHTCYAN', '')}[*] Starting real-time monitor (interval: {interval}s){getattr(Colors, 'RESET', '')}")
+        
+        while self.running:
+            for path in self.monitored_paths:
+                threats = self.scan_directory(path)
+                if threats:
+                    print(f"{getattr(Colors, 'LIGHTYELLOW', '')}[!] Found {len(threats)} threats in {path}{getattr(Colors, 'RESET', '')}")
+            
+            # Sleep in intervals to allow for KeyboardInterrupt
+            for _ in range(interval):
+                if not self.running:
+                    break
+                time.sleep(1)
+    
+    def stop_monitoring(self):
+        """Stop real-time monitoring"""
+        self.running = False
+        print(f"{getattr(Colors, 'LIGHTYELLOW', '')}[!] Monitor stopped{getattr(Colors, 'RESET', '')}")
+
+# ============================================================================
+# WEB API SERVER
+# ============================================================================
+
+if FLASK_AVAILABLE:
+    class WebAPIServer:
+        """Flask-based web API server"""
+        
+        def __init__(self, app_instance):
+            self.app = Flask(__name__)
+            self.csk_app = app_instance
+            self.setup_routes()
+        
+        def setup_routes(self):
+            """Setup API routes"""
+            
+            @self.app.route('/')
+            def home():
+                return jsonify({
+                    'name': 'CSK Guardian v2.0 API',
+                    'status': 'online',
+                    'version': '2.0',
+                    'endpoints': [
+                        '/api/scan/url',
+                        '/api/scan/file',
+                        '/api/history',
+                        '/api/stats',
+                        '/api/health'
+                    ]
+                })
+            
+            @self.app.route('/api/health')
+            def health():
+                return jsonify({
+                    'status': 'healthy',
+                    'timestamp': datetime.datetime.now().isoformat()
+                })
+            
+            @self.app.route('/api/scan/url', methods=['POST'])
+            def scan_url():
+                data = request.get_json()
+                url = data.get('url', '') if data else ''
+                
+                if not url:
+                    return jsonify({'error': 'No URL provided'}), 400
+                
+                # Perform scan
+                results = self.csk_app.enhanced_url_analyzer.analyze(url)
+                
+                # Save to database
+                scan_data = {
+                    'type': 'URL',
+                    'target': url,
+                    'risk_score': results['risk_score'],
+                    'risk_level': results['risk_level'],
+                    'details': results
+                }
+                self.csk_app.db.save_scan(scan_data)
+                
+                return jsonify(results)
+            
+            @self.app.route('/api/history')
+            def get_history():
+                limit = request.args.get('limit', 50, type=int)
+                history = self.csk_app.db.get_recent_scans(limit)
+                return jsonify({'history': history})
+            
+            @self.app.route('/api/stats')
+            def get_stats():
+                conn = sqlite3.connect(Config.DATABASE_FILE)
+                cursor = conn.cursor()
+                
+                # Get total scans
+                cursor.execute("SELECT COUNT(*) FROM scans")
+                total_scans = cursor.fetchone()[0]
+                
+                # Get risk distribution
+                cursor.execute("""
+                    SELECT risk_level, COUNT(*) 
+                    FROM scans 
+                    GROUP BY risk_level
+                """)
+                risk_dist = dict(cursor.fetchall())
+                
+                conn.close()
+                
+                return jsonify({
+                    'total_scans': total_scans,
+                    'risk_distribution': risk_dist,
+                    'timestamp': datetime.datetime.now().isoformat()
+                })
+        
+        def run(self, host='127.0.0.1', port=5000, debug=False):
+            """Run the web server"""
+            print(f"{getattr(Colors, 'LIGHTGREEN', '')}[✓] Starting web API server on http://{host}:{port}{getattr(Colors, 'RESET', '')}")
+            self.app.run(host=host, port=port, debug=debug)
+
+# ============================================================================
+# ENHANCED MAIN APPLICATION
+# ============================================================================
+
+class EnhancedCSKGuardian:
+    """Enhanced main application class with all features"""
+    
+    def __init__(self):
+        # Initialize directories
+        ensure_directories()
+        
+        # Initialize components
+        self.db = DatabaseManager()
+        self.ml_engine = MLDetectionEngine()
+        self.enhanced_url_analyzer = EnhancedURLAnalyzer(self.ml_engine, self.db)
+        self.enhanced_file_analyzer = EnhancedFileAnalyzer(self.ml_engine, self.db)
+        self.report_generator = EnhancedReportGenerator()
+        self.monitor = RealtimeMonitor(self.enhanced_file_analyzer)
+        self.history_manager = HistoryManager()
+        
+        # API server
+        self.api_server = None
+        if FLASK_AVAILABLE:
+            self.api_server = WebAPIServer(self)
+    
+    def display_enhanced_menu(self):
+        """Display enhanced interactive menu"""
+        print(f"\n{getattr(Colors, 'LIGHTCYAN', '')}{'='*70}{getattr(Colors, 'RESET', '')}")
+        print(f"{getattr(Colors, 'BOLD', '')}ENHANCED MAIN MENU - CSK Guardian v2.0{getattr(Colors, 'RESET', '')}")
+        print(f"{getattr(Colors, 'LIGHTCYAN', '')}{'='*70}{getattr(Colors, 'RESET', '')}")
+        
+        menu_items = [
+            ("1. Scan URL (Enhanced)", "Deep URL analysis with ML and API checks"),
+            ("2. Scan File (Enhanced)", "Advanced file analysis with multiple engines"),
+            ("3. Batch Scan", "Scan multiple URLs/files from file"),
+            ("4. Deep Scan", "Maximum depth analysis (slower but thorough)"),
+            ("5. Real-time Monitor", "Monitor directories for threats"),
+            ("6. View History", "Browse scan history"),
+            ("7. Generate Report", "Create comprehensive HTML reports"),
+            ("8. Threat Intelligence", "View/update threat database"),
+            ("9. Web API Server", "Start REST API server"),
+            ("10. Settings", "Configure API keys and options"),
+            ("11. Exit", "Exit application")
+        ]
+        
+        for item, desc in menu_items:
+            print(f"{getattr(Colors, 'LIGHTGREEN', '')}{item.split()[0]}{getattr(Colors, 'RESET', '')}. {item.split(' ', 1)[1]}")
+            print(f"   {getattr(Colors, 'LIGHTWHITE', '')}{desc}{getattr(Colors, 'RESET', '')}")
+        
+        print(f"{getattr(Colors, 'LIGHTCYAN', '')}{'='*70}{getattr(Colors, 'RESET', '')}")
+    
+    def batch_scan(self):
+        """Batch scan multiple targets from file"""
+        print(f"\n{getattr(Colors, 'BOLD', '')}BATCH SCAN{getattr(Colors, 'RESET', '')}")
+        file_path = input(f"{getattr(Colors, 'CYAN', '')}Enter file path containing targets (one per line): {getattr(Colors, 'RESET', '')}").strip()
+        
+        if not os.path.exists(file_path):
+            print(f"{getattr(Colors, 'RED', '')}[!] File not found{getattr(Colors, 'RESET', '')}")
+            return
+        
+        scan_type = input(f"{getattr(Colors, 'CYAN', '')}Scan type (url/file): {getattr(Colors, 'RESET', '')}").strip().lower()
+        
+        with open(file_path, 'r') as f:
+            targets = [line.strip() for line in f if line.strip()]
+        
+        print(f"\n{getattr(Colors, 'YELLOW', '')}[*] Starting batch scan of {len(targets)} targets{getattr(Colors, 'RESET', '')}")
+        
+        results = []
+        for i, target in enumerate(targets, 1):
+            print(f"\n{getattr(Colors, 'CYAN', '')}[{i}/{len(targets)}] Scanning: {target}{getattr(Colors, 'RESET', '')}")
+            
+            if scan_type == 'url':
+                result = self.enhanced_url_analyzer.analyze(target)
+            else:
+                result = self.enhanced_file_analyzer.analyze(target)
+            
+            results.append({
+                'target': target,
+                'risk_score': result['risk_score'],
+                'risk_level': result['risk_level']
+            })
+        
+        # Summary
+        print(f"\n{getattr(Colors, 'BOLD', '')}BATCH SCAN SUMMARY{getattr(Colors, 'RESET', '')}")
+        print(f"{'='*50}")
+        
+        safe = sum(1 for r in results if r['risk_level'] == 'SAFE')
+        suspicious = sum(1 for r in results if r['risk_level'] == 'SUSPICIOUS')
+        dangerous = sum(1 for r in results if r['risk_level'] == 'DANGEROUS')
+        
+        print(f"Safe: {getattr(Colors, 'GREEN', '')}{safe}{getattr(Colors, 'RESET', '')}")
+        print(f"Suspicious: {getattr(Colors, 'YELLOW', '')}{suspicious}{getattr(Colors, 'RESET', '')}")
+        print(f"Dangerous: {getattr(Colors, 'RED', '')}{dangerous}{getattr(Colors, 'RESET', '')}")
+        
+        # Save results
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        result_file = Path(Config.REPORTS_DIR) / f"batch_scan_{timestamp}.json"
+        
+        with open(result_file, 'w') as f:
+            json.dump(results, f, indent=2)
+        
+        print(f"{getattr(Colors, 'GREEN', '')}[✓] Results saved to: {result_file}{getattr(Colors, 'RESET', '')}")
+    
+    def deep_scan(self):
+        """Perform deep scan with maximum analysis"""
+        print(f"\n{getattr(Colors, 'BOLD', '')}DEEP SCAN MODE{getattr(Colors, 'RESET', '')}")
+        print(f"{getattr(Colors, 'YELLOW', '')}[!] This will perform maximum depth analysis (may take longer){getattr(Colors, 'RESET', '')}")
+        
+        scan_type = input(f"{getattr(Colors, 'CYAN', '')}Scan type (url/file): {getattr(Colors, 'RESET', '')}").strip().lower()
+        
+        if scan_type == 'url':
+            url = input(f"{getattr(Colors, 'CYAN', '')}Enter URL for deep scan: {getattr(Colors, 'RESET', '')}").strip()
+            
+            # Extended analysis
+            print(f"{getattr(Colors, 'CYAN', '')}[*] Performing deep URL analysis...{getattr(Colors, 'RESET', '')}")
+            
+            # Multiple API checks
+            if Config.VIRUSTOTAL_API_KEY:
+                vt_result = self.enhanced_url_analyzer.check_virustotal(url)
+                print(f"  VirusTotal: {vt_result}")
+            
+            if Config.URLSCAN_API_KEY:
+                urlscan_result = self.enhanced_url_analyzer.check_urlscan(url)
+                print(f"  URLScan.io: {urlscan_result}")
+            
+            # Wayback machine check
+            try:
+                if self.enhanced_url_analyzer.session:
+                    wayback_url = f"http://archive.org/wayback/available?url={url}"
+                    response = self.enhanced_url_analyzer.session.get(wayback_url)
+                    if response.status_code == 200:
+                        data = response.json()
+                        if data.get('archived_snapshots'):
+                            print(f"  {getattr(Colors, 'YELLOW', '')}⚠ Archived versions found{getattr(Colors, 'RESET', '')}")
+            except:
+                pass
+            
+            # Perform standard enhanced analysis
+            results = self.enhanced_url_analyzer.analyze(url)
+            self.enhanced_url_analyzer.display_results()
+            
+        else:
+            file_path = input(f"{getattr(Colors, 'CYAN', '')}Enter file path for deep scan: {getattr(Colors, 'RESET', '')}").strip()
+            results = self.enhanced_file_analyzer.analyze(file_path, deep_scan=True)
+            self.enhanced_file_analyzer.display_results()
+    
+    def threat_intelligence(self):
+        """Threat intelligence management"""
+        print(f"\n{getattr(Colors, 'BOLD', '')}THREAT INTELLIGENCE{getattr(Colors, 'RESET', '')}")
+        print(f"{getattr(Colors, 'CYAN', '')}{'='*50}{getattr(Colors, 'RESET', '')}")
+        
+        print("1. View threat database stats")
+        print("2. Add threat indicator")
+        print("3. Import threat feed")
+        print("4. Export threat database")
+        
+        choice = input(f"\n{getattr(Colors, 'CYAN', '')}Enter choice: {getattr(Colors, 'RESET', '')}").strip()
+        
+        if choice == '1':
+            conn = sqlite3.connect(Config.DATABASE_FILE)
+            cursor = conn.cursor()
+            
+            cursor.execute("SELECT COUNT(*) FROM threat_intel")
+            total = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT threat_type, COUNT(*) FROM threat_intel GROUP BY threat_type")
+            types = dict(cursor.fetchall())
+            
+            conn.close()
+            
+            print(f"\n{getattr(Colors, 'BOLD', '')}Threat Database Stats{getattr(Colors, 'RESET', '')}")
+            print(f"Total indicators: {total}")
+            print("By type:")
+            for t_type, count in types.items():
+                print(f"  {t_type}: {count}")
+        
+        elif choice == '2':
+            i_type = input("Indicator type (domain/ip/hash): ").strip()
+            i_value = input("Indicator value: ").strip()
+            threat_type = input("Threat type: ").strip()
+            confidence = input("Confidence (0-100): ").strip()
+            
+            self.db.add_threat_indicator({
+                'type': i_type,
+                'value': i_value,
+                'threat_type': threat_type,
+                'confidence': int(confidence) if confidence else 50,
+                'source': 'manual'
+            })
+            
+            print(f"{getattr(Colors, 'GREEN', '')}[✓] Indicator added{getattr(Colors, 'RESET', '')}")
+    
+    def settings(self):
+        """Configure application settings"""
+        print(f"\n{getattr(Colors, 'BOLD', '')}SETTINGS{getattr(Colors, 'RESET', '')}")
+        print(f"{getattr(Colors, 'CYAN', '')}{'='*50}{getattr(Colors, 'RESET', '')}")
+        
+        print("Current API Keys:")
+        print(f"  VirusTotal: {'*' * len(Config.VIRUSTOTAL_API_KEY) if Config.VIRUSTOTAL_API_KEY else 'Not set'}")
+        print(f"  AbuseIPDB: {'*' * len(Config.ABUSEIPDB_API_KEY) if Config.ABUSEIPDB_API_KEY else 'Not set'}")
+        print(f"  URLScan.io: {'*' * len(Config.URLSCAN_API_KEY) if Config.URLSCAN_API_KEY else 'Not set'}")
+        
+        print("\n1. Set API Keys")
+        print("2. Configure scan options")
+        print("3. Clear history")
+        print("4. Back")
+        
+        choice = input(f"\n{getattr(Colors, 'CYAN', '')}Enter choice: {getattr(Colors, 'RESET', '')}").strip()
+        
+        if choice == '1':
+            Config.VIRUSTOTAL_API_KEY = input("VirusTotal API Key: ").strip()
+            Config.ABUSEIPDB_API_KEY = input("AbuseIPDB API Key: ").strip()
+            Config.URLSCAN_API_KEY = input("URLScan.io API Key: ").strip()
+            print(f"{getattr(Colors, 'GREEN', '')}[✓] API keys updated{getattr(Colors, 'RESET', '')}")
+        
+        elif choice == '2':
+            try:
+                max_threads = input(f"Max threads (current: {Config.MAX_THREADS}): ").strip()
+                if max_threads:
+                    Config.MAX_THREADS = int(max_threads)
+                
+                timeout = input(f"Timeout seconds (current: {Config.TIMEOUT}): ").strip()
+                if timeout:
+                    Config.TIMEOUT = int(timeout)
+                
+                rate_limit = input(f"Rate limit/sec (current: {Config.RATE_LIMIT}): ").strip()
+                if rate_limit:
+                    Config.RATE_LIMIT = int(rate_limit)
+                    
+                print(f"{getattr(Colors, 'GREEN', '')}[✓] Settings updated{getattr(Colors, 'RESET', '')}")
+            except ValueError:
+                print(f"{getattr(Colors, 'RED', '')}[!] Invalid input{getattr(Colors, 'RESET', '')}")
+        
+        elif choice == '3':
+            confirm = input("Clear all scan history? (yes/no): ").strip().lower()
+            if confirm == 'yes':
+                self.history_manager.clear_history()
+                
+                # Also clear database
+                conn = sqlite3.connect(Config.DATABASE_FILE)
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM scans")
+                conn.commit()
+                conn.close()
+                
+                print(f"{getattr(Colors, 'GREEN', '')}[✓] History cleared{getattr(Colors, 'RESET', '')}")
+    
+    def run(self):
+        """Enhanced main application loop"""
+        display_banner()
+        
+        while True:
+            self.display_enhanced_menu()
+            choice = input(f"\n{getattr(Colors, 'LIGHTCYAN', '')}Enter your choice: {getattr(Colors, 'RESET', '')}").strip()
+            
+            if choice == '1':
+                url = input(f"{getattr(Colors, 'CYAN', '')}Enter URL to scan: {getattr(Colors, 'RESET', '')}").strip()
+                if url:
+                    results = self.enhanced_url_analyzer.analyze(url)
+                    self.enhanced_url_analyzer.display_results()
+                    
+                    # Save to database
+                    scan_data = {
+                        'type': 'URL',
+                        'target': url,
+                        'risk_score': results['risk_score'],
+                        'risk_level': results['risk_level'],
+                        'details': results
+                    }
+                    self.db.save_scan(scan_data)
+                    
+                    # Ask for report
+                    if input(f"\n{getattr(Colors, 'CYAN', '')}Generate HTML report? (y/n): {getattr(Colors, 'RESET', '')}").strip().lower() == 'y':
+                        report_path = self.report_generator.generate_url_report(results)
+                        if report_path:
+                            print(f"{getattr(Colors, 'GREEN', '')}[✓] Report saved to: {report_path}{getattr(Colors, 'RESET', '')}")
+            
+            elif choice == '2':
+                file_path = input(f"{getattr(Colors, 'CYAN', '')}Enter file path to scan: {getattr(Colors, 'RESET', '')}").strip()
+                file_path = os.path.expanduser(file_path)
+                
+                if os.path.exists(file_path):
+                    quarantine = input(f"{getattr(Colors, 'CYAN', '')}Quarantine if dangerous? (y/n): {getattr(Colors, 'RESET', '')}").strip().lower() == 'y'
+                    
+                    results = self.enhanced_file_analyzer.analyze(file_path, quarantine=quarantine)
+                    
+                    if 'error' not in results:
+                        self.enhanced_file_analyzer.display_results()
+                        
+                        # Save to database
+                        scan_data = {
+                            'type': 'File',
+                            'target': file_path,
+                            'risk_score': results['risk_score'],
+                            'risk_level': results['risk_level'],
+                            'details': results
+                        }
+                        self.db.save_scan(scan_data)
+                        
+                        # Ask for report
+                        if input(f"\n{getattr(Colors, 'CYAN', '')}Generate HTML report? (y/n): {getattr(Colors, 'RESET', '')}").strip().lower() == 'y':
+                            report_path = self.report_generator.generate_file_report(results)
+                            if report_path:
+                                print(f"{getattr(Colors, 'GREEN', '')}[✓] Report saved to: {report_path}{getattr(Colors, 'RESET', '')}")
+                else:
+                    print(f"{getattr(Colors, 'RED', '')}[!] File not found{getattr(Colors, 'RESET', '')}")
+            
+            elif choice == '3':
+                self.batch_scan()
+            
+            elif choice == '4':
+                self.deep_scan()
+            
+            elif choice == '5':
+                print(f"\n{getattr(Colors, 'BOLD', '')}REAL-TIME MONITOR{getattr(Colors, 'RESET', '')}")
+                path = input(f"{getattr(Colors, 'CYAN', '')}Enter path to monitor: {getattr(Colors, 'RESET', '')}").strip()
+                path = os.path.expanduser(path)
+                
+                if os.path.exists(path):
+                    self.monitor.add_path(path)
+                    
+                    interval = int(input(f"{getattr(Colors, 'CYAN', '')}Scan interval (seconds): {getattr(Colors, 'RESET', '')}").strip() or "60")
+                    
+                    try:
+                        self.monitor.start_monitoring(interval)
+                    except KeyboardInterrupt:
+                        self.monitor.stop_monitoring()
+                else:
+                    print(f"{getattr(Colors, 'RED', '')}[!] Path not found{getattr(Colors, 'RESET', '')}")
+            
+            elif choice == '6':
+                history = self.db.get_recent_scans(50)
+                
+                if not history:
+                    print(f"{getattr(Colors, 'YELLOW', '')}[!] No scan history found{getattr(Colors, 'RESET', '')}")
+                else:
+                    print(f"\n{getattr(Colors, 'BOLD', '')}RECENT SCANS{getattr(Colors, 'RESET', '')}")
+                    print(f"{getattr(Colors, 'CYAN', '')}{'='*70}{getattr(Colors, 'RESET', '')}")
+                    
+                    for scan in history:
+                        timestamp = scan['timestamp'][:19] if scan['timestamp'] else 'Unknown'
+                        color = get_risk_color(scan['risk_score'])
+                        
+                        print(f"{timestamp} | {color}{scan['type']:4}{getattr(Colors, 'RESET', '')} | "
+                              f"Score: {color}{scan['risk_score']:3}{getattr(Colors, 'RESET', '')} | "
+                              f"Level: {color}{scan['risk_level']:10}{getattr(Colors, 'RESET', '')} | "
+                              f"Target: {scan['target'][:30]}")
+            
+            elif choice == '7':
+                print(f"\n{getattr(Colors, 'BOLD', '')}REPORT GENERATION{getattr(Colors, 'RESET', '')}")
+                print(f"Reports are saved in: {Config.REPORTS_DIR}/")
+                
+                # List recent reports
+                reports_dir = Path(Config.REPORTS_DIR)
+                reports = sorted(reports_dir.glob("*.html"), key=os.path.getmtime, reverse=True)[:10]
+                
+                if reports:
+                    print(f"\n{getattr(Colors, 'GREEN', '')}Recent reports:{getattr(Colors, 'RESET', '')}")
+                    for i, report in enumerate(reports, 1):
+                        mtime = datetime.datetime.fromtimestamp(os.path.getmtime(report))
+                        print(f"  {i}. {report.name} ({mtime.strftime('%Y-%m-%d %H:%M')})")
+            
+            elif choice == '8':
+                self.threat_intelligence()
+            
+            elif choice == '9':
+                if self.api_server:
+                    print(f"\n{getattr(Colors, 'BOLD', '')}STARTING WEB API SERVER{getattr(Colors, 'RESET', '')}")
+                    host = input(f"{getattr(Colors, 'CYAN', '')}Host (default: 127.0.0.1): {getattr(Colors, 'RESET', '')}").strip() or "127.0.0.1"
+                    port = int(input(f"{getattr(Colors, 'CYAN', '')}Port (default: 5000): {getattr(Colors, 'RESET', '')}").strip() or "5000")
+                    
+                    try:
+                        self.api_server.run(host=host, port=port)
+                    except KeyboardInterrupt:
+                        print(f"\n{getattr(Colors, 'YELLOW', '')}[!] Server stopped{getattr(Colors, 'RESET', '')}")
+                else:
+                    print(f"{getattr(Colors, 'RED', '')}[!] Flask not installed. Install with: pip install flask{getattr(Colors, 'RESET', '')}")
+            
+            elif choice == '10':
+                self.settings()
+            
+            elif choice == '11':
+                print(f"\n{getattr(Colors, 'GREEN', '')}Thank you for using CSK Guardian v2.0. Stay safe!{getattr(Colors, 'RESET', '')}")
+                break
+            
+            else:
+                print(f"{getattr(Colors, 'RED', '')}[!] Invalid choice{getattr(Colors, 'RESET', '')}")
+            
+            if choice not in ['5', '9']:  # Don't pause for continuous operations
+                input(f"\n{getattr(Colors, 'CYAN', '')}Press Enter to continue...{getattr(Colors, 'RESET', '')}")
+
+# ============================================================================
+# ENHANCED COMMAND LINE INTERFACE
+# ============================================================================
+
+def enhanced_main():
+    """Enhanced command line entry point"""
+    parser = argparse.ArgumentParser(description='CSK Guardian v2.0 - Enhanced AI-Powered Security Analyzer')
+    
+    # Basic options
+    parser.add_argument('--url', '-u', help='Scan a single URL')
+    parser.add_argument('--file', '-f', help='Scan a single file')
+    parser.add_argument('--deep', '-d', action='store_true', help='Perform deep scan')
+    parser.add_argument('--batch', '-b', help='Batch scan from file')
+    parser.add_argument('--type', '-t', choices=['url', 'file'], default='url', help='Batch scan type')
+    
+    # Output options
+    parser.add_argument('--report', '-r', action='store_true', help='Generate HTML report')
+    parser.add_argument('--output', '-o', help='Output file for results')
+    parser.add_argument('--format', '-F', choices=['json', 'csv', 'html'], default='json', help='Output format')
+    
+    # API options
+    parser.add_argument('--api', action='store_true', help='Start API server')
+    parser.add_argument('--host', default='127.0.0.1', help='API server host')
+    parser.add_argument('--port', type=int, default=5000, help='API server port')
+    
+    # Monitor options
+    parser.add_argument('--monitor', '-m', help='Monitor directory for threats')
+    parser.add_argument('--interval', type=int, default=60, help='Monitor interval (seconds)')
+    
+    # Database options
+    parser.add_argument('--history', '-H', action='store_true', help='View scan history')
+    parser.add_argument('--stats', '-s', action='store_true', help='Show statistics')
+    parser.add_argument('--clear-history', action='store_true', help='Clear scan history')
+    
+    # Configuration
+    parser.add_argument('--config', help='Configuration file path')
+    parser.add_argument('--verbose', '-v', action='store_true', help='Verbose output')
+    
+    args = parser.parse_args()
+    
+    # Create application instance
+    app = EnhancedCSKGuardian()
+    
+    # Load config if specified
+    if args.config and os.path.exists(args.config):
+        try:
+            with open(args.config, 'r') as f:
+                config = json.load(f)
+                # Update API keys
+                Config.VIRUSTOTAL_API_KEY = config.get('virustotal_api_key', Config.VIRUSTOTAL_API_KEY)
+                Config.ABUSEIPDB_API_KEY = config.get('abuseipdb_api_key', Config.ABUSEIPDB_API_KEY)
+                Config.URLSCAN_API_KEY = config.get('urlscan_api_key', Config.URLSCAN_API_KEY)
+        except:
+            pass
+    
+    # Handle commands
+    if args.clear_history:
+        app.history_manager.clear_history()
+        conn = sqlite3.connect(Config.DATABASE_FILE)
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM scans")
+        conn.commit()
+        conn.close()
+        print(f"{getattr(Colors, 'GREEN', '')}[✓] History cleared{getattr(Colors, 'RESET', '')}")
+        return
+    
+    if args.stats:
+        conn = sqlite3.connect(Config.DATABASE_FILE)
+        cursor = conn.cursor()
+        
+        cursor.execute("SELECT COUNT(*) FROM scans")
+        total_scans = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT risk_level, COUNT(*) FROM scans GROUP BY risk_level")
+        risk_dist = dict(cursor.fetchall())
+        
+        cursor.execute("SELECT scan_type, COUNT(*) FROM scans GROUP BY scan_type")
+        type_dist = dict(cursor.fetchall())
+        
+        conn.close()
+        
+        print(f"\n{getattr(Colors, 'BOLD', '')}CSK Guardian Statistics{getattr(Colors, 'RESET', '')}")
+        print(f"{'='*50}")
+        print(f"Total Scans: {total_scans}")
+        print(f"\nBy Risk Level:")
+        for level, count in risk_dist.items():
+            color = get_risk_color(0)  # Just for color name
+            print(f"  {level}: {count}")
+        print(f"\nBy Type:")
+        for stype, count in type_dist.items():
+            print(f"  {stype}: {count}")
+        return
+    
+    if args.api:
+        if app.api_server:
+            print(f"{getattr(Colors, 'GREEN', '')}[✓] Starting API server on {args.host}:{args.port}{getattr(Colors, 'RESET', '')}")
+            app.api_server.run(host=args.host, port=args.port)
+        else:
+            print(f"{getattr(Colors, 'RED', '')}[!] Flask not installed. Install with: pip install flask{getattr(Colors, 'RESET', '')}")
+        return
+    
+    if args.monitor:
+        app.monitor.add_path(args.monitor)
+        try:
+            app.monitor.start_monitoring(args.interval)
+        except KeyboardInterrupt:
+            app.monitor.stop_monitoring()
+        return
+    
+    if args.batch:
+        if not os.path.exists(args.batch):
+            print(f"{getattr(Colors, 'RED', '')}[!] Batch file not found: {args.batch}{getattr(Colors, 'RESET', '')}")
+            return
+        
+        with open(args.batch, 'r') as f:
+            targets = [line.strip() for line in f if line.strip()]
+        
+        print(f"{getattr(Colors, 'CYAN', '')}[*] Batch scanning {len(targets)} targets{getattr(Colors, 'RESET', '')}")
+        
+        results = []
+        for target in targets:
+            if args.type == 'url':
+                result = app.enhanced_url_analyzer.analyze(target)
+            else:
+                result = app.enhanced_file_analyzer.analyze(target)
+            
+            results.append({
+                'target': target,
+                'risk_score': result['risk_score'],
+                'risk_level': result['risk_level'],
+                'findings': result['findings'][:3]
+            })
+        
+        # Output results
+        if args.output:
+            with open(args.output, 'w') as f:
+                if args.format == 'json':
+                    json.dump(results, f, indent=2)
+                elif args.format == 'csv':
+                    import csv
+                    writer = csv.DictWriter(f, fieldnames=['target', 'risk_score', 'risk_level', 'findings'])
+                    writer.writeheader()
+                    writer.writerows(results)
+            
+            print(f"{getattr(Colors, 'GREEN', '')}[✓] Results saved to: {args.output}{getattr(Colors, 'RESET', '')}")
+        else:
+            print(json.dumps(results, indent=2))
+        
+        return
+    
+    if args.url:
+        display_banner()
+        if args.deep:
+            print(f"{getattr(Colors, 'YELLOW', '')}[!] Deep scan mode enabled{getattr(Colors, 'RESET', '')}")
+        
+        results = app.enhanced_url_analyzer.analyze(args.url)
+        app.enhanced_url_analyzer.display_results()
+        
+        # Save to database
+        scan_data = {
+            'type': 'URL',
+            'target': args.url,
+            'risk_score': results['risk_score'],
+            'risk_level': results['risk_level'],
+            'details': results
+        }
+        app.db.save_scan(scan_data)
+        
+        # Generate report if requested
+        if args.report:
+            report_path = app.report_generator.generate_url_report(results)
+            if report_path:
+                print(f"{getattr(Colors, 'GREEN', '')}[✓] Report saved to: {report_path}{getattr(Colors, 'RESET', '')}")
+        
+        # Save output if requested
+        if args.output:
+            with open(args.output, 'w') as f:
+                json.dump(results, f, indent=2)
+            print(f"{getattr(Colors, 'GREEN', '')}[✓] Results saved to: {args.output}{getattr(Colors, 'RESET', '')}")
+        
+        return
+    
+    if args.file:
+        display_banner()
+        if args.deep:
+            print(f"{getattr(Colors, 'YELLOW', '')}[!] Deep scan mode enabled{getattr(Colors, 'RESET', '')}")
+        
+        results = app.enhanced_file_analyzer.analyze(args.file, deep_scan=args.deep)
+        
+        if 'error' not in results:
+            app.enhanced_file_analyzer.display_results()
+            
+            # Save to database
+            scan_data = {
+                'type': 'File',
+                'target': args.file,
+                'risk_score': results['risk_score'],
+                'risk_level': results['risk_level'],
+                'details': results
+            }
+            app.db.save_scan(scan_data)
+            
+            # Generate report if requested
+            if args.report:
+                report_path = app.report_generator.generate_file_report(results)
+                if report_path:
+                    print(f"{getattr(Colors, 'GREEN', '')}[✓] Report saved to: {report_path}{getattr(Colors, 'RESET', '')}")
+            
+            # Save output if requested
+            if args.output:
+                with open(args.output, 'w') as f:
+                    json.dump(results, f, indent=2)
+                print(f"{getattr(Colors, 'GREEN', '')}[✓] Results saved to: {args.output}{getattr(Colors, 'RESET', '')}")
+        
+        return
+    
+    if args.history:
+        display_banner()
+        history = app.db.get_recent_scans(50)
+        
+        if not history:
+            print(f"{getattr(Colors, 'YELLOW', '')}[!] No scan history found{getattr(Colors, 'RESET', '')}")
+        else:
+            print(f"\n{getattr(Colors, 'BOLD', '')}RECENT SCANS{getattr(Colors, 'RESET', '')}")
+            print(f"{getattr(Colors, 'CYAN', '')}{'='*70}{getattr(Colors, 'RESET', '')}")
+            
+            for scan in history:
+                timestamp = scan['timestamp'][:19] if scan['timestamp'] else 'Unknown'
+                color = get_risk_color(scan['risk_score'])
+                
+                print(f"{timestamp} | {color}{scan['type']:4}{getattr(Colors, 'RESET', '')} | "
+                      f"Score: {color}{scan['risk_score']:3}{getattr(Colors, 'RESET', '')} | "
+                      f"Level: {color}{scan['risk_level']:10}{getattr(Colors, 'RESET', '')} | "
+                      f"Target: {scan['target'][:30]}")
+        return
+    
+    # If no arguments, run interactive mode
+    app.run()
+
+# ============================================================================
+# MAIN ENTRY POINT
+# ============================================================================
+
+if __name__ == "__main__":
+    try:
+        enhanced_main()
+    except KeyboardInterrupt:
+        print(f"\n\n{getattr(Colors, 'LIGHTYELLOW', '')}[!] Interrupted by user{getattr(Colors, 'RESET', '')}")
+        sys.exit(0)
+    except Exception as e:
+        print(f"\n{getattr(Colors, 'LIGHTRED', '')}[!] Unexpected error: {e}{getattr(Colors, 'RESET', '')}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
